@@ -36,5 +36,5 @@ def ask_ollama(image_path, model="gemma4:e4b"):
         print(f"Error communicating with Ollama: {e}")
 
 if __name__ == "__main__":
-    test_image = "test.jpg"
+    test_image = "../data/test.jpg"
     ask_ollama(test_image)
