@@ -1,0 +1,10 @@
+insightface
+onnxruntime-gpu  # or onnxruntime for CPU
+opencv-python
+numpy
+scikit-learn
+tqdm
+pillow
+torch
+torchvision
+clip @ git+https://github.com/openai/CLIP.git
