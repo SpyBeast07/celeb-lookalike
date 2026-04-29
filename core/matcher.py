@@ -1,12 +1,15 @@
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
 
-class Matcher:
-    def __init__(self, database_embeddings, database_labels):
-        self.database_embeddings = database_embeddings
-        self.database_labels = database_labels
+def cosine(a, b):
+    """Calculate cosine similarity between two embeddings."""
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
-    def find_best_match(self, query_embedding):
-        similarities = cosine_similarity([query_embedding], self.database_embeddings)
-        best_idx = np.argmax(similarities)
-        return self.database_labels[best_idx], similarities[0][best_idx]
+def find_top_k(query, db, k=3):
+    """Find top K matches in the database for a query embedding."""
+    scores = []
+    for name, emb in db:
+        score = cosine(query, emb)
+        scores.append((name, score))
+    
+    # Sort by similarity score descending
+    return sorted(scores, key=lambda x: x[1], reverse=True)[:k]

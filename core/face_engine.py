@@ -1,12 +1,9 @@
-import cv2
-import insightface
 from insightface.app import FaceAnalysis
 
-class FaceEngine:
-    def __init__(self, model_name='buffalo_l'):
-        self.app = FaceAnalysis(name=model_name)
-        self.app.prepare(ctx_id=0, det_size=(640, 640))
+# Initialize InsightFace with CoreML for Mac optimization
+app = FaceAnalysis(providers=['CoreMLExecutionProvider', 'CPUExecutionProvider'])
+app.prepare(ctx_id=0)
 
-    def detect_and_embed(self, img):
-        faces = self.app.get(img)
-        return faces
+def get_faces(frame):
+    """Detect and extract embeddings from faces in a frame."""
+    return app.get(frame)

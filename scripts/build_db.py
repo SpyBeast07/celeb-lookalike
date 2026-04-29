@@ -1,56 +1,48 @@
 import os
 import cv2
-import numpy as np
 from tqdm import tqdm
-from core.face_engine import FaceEngine
-from core.database import Database
+from core.face_engine import get_faces
+from core.database import save_db
 
-def build_database(raw_data_path):
-    print(f"Building database from {raw_data_path}...")
-    engine = FaceEngine()
-    db = Database()
+def build_database(raw_path="data/raw"):
+    """
+    Reads images from the raw dataset, extracts face embeddings, 
+    and saves them to a database file.
+    """
+    if not os.path.exists(raw_path):
+        print(f"Error: {raw_path} directory not found.")
+        return
+
+    db = []
     
-    embeddings = []
-    labels = []
+    # Iterate through folders (each folder name is the celebrity's name)
+    folders = [f for f in os.listdir(raw_path) if os.path.isdir(os.path.join(raw_path, f))]
     
-    # Iterate through folders (celebrities)
-    for person_name in tqdm(os.listdir(raw_data_path)):
-        person_dir = os.path.join(raw_data_path, person_name)
-        if not os.path.isdir(person_dir):
-            continue
-            
-        # Iterate through images for each person
+    print(f"Found {len(folders)} celebrity folders. Starting embedding extraction...")
+    
+    for person_name in tqdm(folders):
+        person_dir = os.path.join(raw_path, person_name)
+        
         for img_name in os.listdir(person_dir):
-            img_path = os.path.join(person_dir, img_name)
             if not img_name.lower().endswith(('.png', '.jpg', '.jpeg')):
                 continue
                 
+            img_path = os.path.join(person_dir, img_name)
             img = cv2.imread(img_path)
             if img is None:
-                print(f"Warning: Could not read {img_path}")
                 continue
-                
-            faces = engine.detect_and_embed(img)
             
-            if not faces:
-                # print(f"Warning: No face detected in {img_path}")
-                continue
-                
-            # Use the largest face or first detected face
-            # InsightFace sorts by detection score, but we could sort by bbox size
-            face = sorted(faces, key=lambda x: (x.bbox[2]-x.bbox[0])*(x.bbox[3]-x.bbox[1]), reverse=True)[0]
-            
-            embeddings.append(face.normed_embedding)
-            labels.append(person_name)
-            
-    if embeddings:
-        print(f"Saving {len(embeddings)} embeddings to database...")
-        db.save(np.array(embeddings), labels)
-        print("Done!")
+            faces = get_faces(img)
+            if faces:
+                # We take the first (usually most prominent) face detected
+                emb = faces[0].embedding
+                db.append((person_name, emb))
+    
+    if db:
+        save_db(db)
+        print(f"Successfully built database with {len(db)} embeddings.")
     else:
-        print("No embeddings found to save.")
+        print("No faces detected in the dataset. Database not created.")
 
 if __name__ == "__main__":
-    # Example usage: point to the raw data directory
-    # Note: You can symlink or move your celebrities_small folder to data/raw
-    build_database('data/raw')
+    build_database()

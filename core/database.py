@@ -1,16 +1,16 @@
 import pickle
 import os
 
-class Database:
-    def __init__(self, db_path='models/embeddings.pkl'):
-        self.db_path = db_path
+def save_db(db, path="models/db.pkl"):
+    """Save the embedding database to a pickle file."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        pickle.dump(db, f)
 
-    def save(self, embeddings, labels):
-        with open(self.db_path, 'wb') as f:
-            pickle.dump({'embeddings': embeddings, 'labels': labels}, f)
-
-    def load(self):
-        if os.path.exists(self.db_path):
-            with open(self.db_path, 'rb') as f:
-                return pickle.load(f)
-        return None
+def load_db(path="models/db.pkl"):
+    """Load the embedding database from a pickle file."""
+    if not os.path.exists(path):
+        print(f"Warning: Database file {path} not found. Returning empty list.")
+        return []
+    with open(path, "rb") as f:
+        return pickle.load(f)
