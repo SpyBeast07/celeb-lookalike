@@ -7,8 +7,8 @@ from core.database import save_db
 
 def build_database(raw_path="data/raw"):
     """
-    Extracts both InsightFace and CLIP embeddings for each celebrity image.
-    Saves format: (name, face_embedding, clip_embedding)
+    Extracts Face, CLIP, and Human Attributes (Gender/Age) for each celebrity.
+    Saves format: (name, face_embedding, clip_embedding, gender, age)
     """
     if not os.path.exists(raw_path):
         print(f"Error: {raw_path} directory not found.")
@@ -17,10 +17,14 @@ def build_database(raw_path="data/raw"):
     db = []
     folders = [f for f in os.listdir(raw_path) if os.path.isdir(os.path.join(raw_path, f))]
     
-    print(f"Phase 2: Building database with Face + CLIP embeddings...")
+    print(f"Phase 3: Building database with Face + CLIP + Attributes...")
     
     for person_name in tqdm(folders):
         person_dir = os.path.join(raw_path, person_name)
+        
+        # We'll average attributes across multiple images of the same person if available
+        # or just take the most frequent/average. For simplicity, we'll collect all and average at the end
+        # but let's just use the first valid detection for now as per minimal core engine plan.
         
         for img_name in os.listdir(person_dir):
             if not img_name.lower().endswith(('.png', '.jpg', '.jpeg')):
@@ -31,22 +35,23 @@ def build_database(raw_path="data/raw"):
             if img is None:
                 continue
             
-            # 1. Extract Face Embedding
             faces = get_faces(img)
             if faces:
-                face_emb = faces[0].embedding
-                
-                # 2. Extract CLIP Embedding (Vibe/Aesthetics)
-                # We can use the whole image or the face crop. 
-                # Usually CLIP on the whole image captures 'vibe' better.
+                face = faces[0]
+                face_emb = face.embedding
                 clip_emb = get_clip_embedding(img)
                 
-                # Store in Phase 2 format
-                db.append((person_name, face_emb, clip_emb))
+                # Phase 3 Attributes
+                gender = face.gender # 0 or 1
+                age = face.age
+                
+                # Store in Phase 3 format
+                db.append((person_name, face_emb, clip_emb, gender, age))
+                # For now, 1 entry per image is fine, matcher will handle duplicates/averaging
     
     if db:
         save_db(db)
-        print(f"Successfully built Phase 2 database with {len(db)} entries.")
+        print(f"Successfully built Phase 3 database with {len(db)} entries.")
     else:
         print("No faces detected. Database not created.")
 

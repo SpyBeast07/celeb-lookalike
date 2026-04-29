@@ -6,7 +6,7 @@ from core.matcher import find_match
 from core.database import load_db
 
 def start_webcam():
-    print("Loading Phase 2 Database (Face + CLIP)...")
+    print("Loading Phase 3 Database (Face + CLIP + Attributes)...")
     db = load_db()
     if not db:
         print("Error: Database is empty. Please run 'scripts/build_db.py' first.")
@@ -29,14 +29,19 @@ def start_webcam():
             face_emb = face.embedding
             
             # 2. Get CLIP Embedding (Vibe/Aesthetics)
-            # We use the current frame (or a crop around the face for better focus)
+            # Use current frame
             clip_emb = get_clip_embedding(frame)
             
-            # Phase 2: Combined Matching
-            results = find_match(face_emb, clip_emb, db, k=5)
+            # 3. Get User Attributes (Phase 3)
+            user_gender = face.gender # 0=Female, 1=Male
+            user_age = face.age
+            
+            # Phase 3: Combined Matching with Attribute Filtering
+            results = find_match(face_emb, clip_emb, user_gender, user_age, db, k=5)
             
             # Debug logging
-            print(f"Top 5 Combined matches: {results}")
+            gender_str = "Male" if user_gender == 1 else "Female"
+            print(f"User: {gender_str}, Age: {user_age} | Top matches: {results}")
             
             display_results = results[:3]
             
@@ -44,7 +49,7 @@ def start_webcam():
             bbox = face.bbox.astype(int)
             x1, y1, x2, y2 = bbox[0], bbox[1], bbox[2], bbox[3]
             
-            # Corners
+            # Modern Tech Corners
             cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), 1)
             l = 20
             c = (0, 255, 0)
@@ -53,10 +58,14 @@ def start_webcam():
             cv2.line(frame, (x1, y2), (x1+l, y2), c, 3); cv2.line(frame, (x1, y2), (x1, y2-l), c, 3)
             cv2.line(frame, (x2, y2), (x2-l, y2), c, 3); cv2.line(frame, (x2, y2), (x2, y2-l), c, 3)
 
-            # Overlay
+            # Overlay for names
             overlay = frame.copy()
-            cv2.rectangle(overlay, (x1, y1-80), (x1+220, y1), (0,0,0), -1)
+            cv2.rectangle(overlay, (x1, y1-85), (x1+230, y1), (0,0,0), -1)
             cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+            
+            # Display user attributes briefly
+            cv2.putText(frame, f"{gender_str}, {int(user_age)}", (x1, y2 + 20), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
             
             for i, (name, score) in enumerate(display_results):
                 color = (0, 255, 0) if i == 0 else (255, 255, 255)
@@ -64,7 +73,7 @@ def start_webcam():
                             (x1+10, y1-10-i*22), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 1, cv2.LINE_AA)
         
-        cv2.imshow("Phase 2: Face + CLIP Vibe Matching", frame)
+        cv2.imshow("Phase 3: Human Perception Matching", frame)
         if cv2.waitKey(1) == 27:
             break
             
