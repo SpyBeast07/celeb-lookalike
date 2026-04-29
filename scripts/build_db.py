@@ -2,23 +2,22 @@ import os
 import cv2
 from tqdm import tqdm
 from core.face_engine import get_faces
+from core.clip_engine import get_clip_embedding
 from core.database import save_db
 
 def build_database(raw_path="data/raw"):
     """
-    Reads images from the raw dataset, extracts face embeddings, 
-    and saves them to a database file.
+    Extracts both InsightFace and CLIP embeddings for each celebrity image.
+    Saves format: (name, face_embedding, clip_embedding)
     """
     if not os.path.exists(raw_path):
         print(f"Error: {raw_path} directory not found.")
         return
 
     db = []
-    
-    # Iterate through folders (each folder name is the celebrity's name)
     folders = [f for f in os.listdir(raw_path) if os.path.isdir(os.path.join(raw_path, f))]
     
-    print(f"Found {len(folders)} celebrity folders. Starting embedding extraction...")
+    print(f"Phase 2: Building database with Face + CLIP embeddings...")
     
     for person_name in tqdm(folders):
         person_dir = os.path.join(raw_path, person_name)
@@ -32,17 +31,24 @@ def build_database(raw_path="data/raw"):
             if img is None:
                 continue
             
+            # 1. Extract Face Embedding
             faces = get_faces(img)
             if faces:
-                # We take the first (usually most prominent) face detected
-                emb = faces[0].embedding
-                db.append((person_name, emb))
+                face_emb = faces[0].embedding
+                
+                # 2. Extract CLIP Embedding (Vibe/Aesthetics)
+                # We can use the whole image or the face crop. 
+                # Usually CLIP on the whole image captures 'vibe' better.
+                clip_emb = get_clip_embedding(img)
+                
+                # Store in Phase 2 format
+                db.append((person_name, face_emb, clip_emb))
     
     if db:
         save_db(db)
-        print(f"Successfully built database with {len(db)} embeddings.")
+        print(f"Successfully built Phase 2 database with {len(db)} entries.")
     else:
-        print("No faces detected in the dataset. Database not created.")
+        print("No faces detected. Database not created.")
 
 if __name__ == "__main__":
     build_database()
