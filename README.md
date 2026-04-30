@@ -29,36 +29,55 @@ celeb-lookalike/
 
 ## 🛠️ Setup
 
-### Backend Setup
-1. `cd backend`
-2. `python -m venv env`
-3. `source env/bin/activate` (or `env\Scripts\activate` on Windows)
-4. `pip install -r requirements.txt`
+### Backend Setup (Python 3.10 recommended)
+1. Navigate to the backend directory:
+   ```bash
+   cd backend
+   ```
+2. Create a virtual environment:
+   ```bash
+   python3 -m venv env
+   ```
+3. Activate the virtual environment:
+   - **Mac/Linux**: `source env/bin/activate`
+   - **Windows**: `env\Scripts\activate`
+4. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ### Frontend Setup
-1. `cd frontend`
-2. `npm install`
+1. Navigate to the frontend directory:
+   ```bash
+   cd frontend
+   ```
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
 
 ## 📖 Usage
 
 ### 1. Build the Face Database
-Add images to `backend/data/raw/` and run:
+Add celebrity images to `backend/data/raw/` (each celebrity in their own folder) and run:
 ```bash
 cd backend
-python main.py --build
+./env/bin/python main.py --build
 ```
 
-### 2. Start the Application
-Run the backend server:
+### 2. Start the Backend Server
 ```bash
 cd backend
-python main.py --server
+./env/bin/python main.py --server
 ```
-Then start the frontend:
+
+### 3. Start the Frontend
 ```bash
 cd frontend
 npm run dev
 ```
+
+The application will be available at `http://localhost:5173`.
 
 ## 📜 License
 MIT

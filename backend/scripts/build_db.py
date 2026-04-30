@@ -3,7 +3,6 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 from core.face_engine import get_faces
-from core.clip_engine import get_clip_embedding
 from core.database import save_db
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -11,24 +10,21 @@ DEFAULT_RAW_PATH = os.path.join(BASE_DIR, "data", "raw")
 
 def build_database(raw_path=DEFAULT_RAW_PATH):
     """
-    Phase 7 Upgrade: Cluster embeddings per celebrity.
-    Instead of multiple entries, we store one 'Centroid' embedding per celeb.
-    Filters for frontal faces and averages attributes for high-quality matching.
+    Build celebrity database using the new engine (InsightFace + MediaPipe).
+    Calculates centroids per celebrity based on face embeddings.
     """
     if not os.path.exists(raw_path):
         print(f"Error: {raw_path} directory not found.")
         return
 
-    # Dictionary to aggregate data per person
-    # { person_name: { 'face_embs': [], 'clip_embs': [], 'genders': [], 'ages': [] } }
     celeb_data = {}
     
     folders = [f for f in os.listdir(raw_path) if os.path.isdir(os.path.join(raw_path, f))]
-    print(f"Phase 7: Upgrading dataset. Processing {len(folders)} celebrities...")
+    print(f"Processing {len(folders)} celebrities for the new engine...")
 
     for person_name in tqdm(folders):
         person_dir = os.path.join(raw_path, person_name)
-        celeb_data[person_name] = {'face': [], 'clip': [], 'gender': [], 'age': []}
+        celeb_data[person_name] = {'face': [], 'gender': [], 'age': []}
         
         for img_name in os.listdir(person_dir):
             if not img_name.lower().endswith(('.png', '.jpg', '.jpeg')):
@@ -40,54 +36,41 @@ def build_database(raw_path=DEFAULT_RAW_PATH):
             
             faces = get_faces(img)
             if faces:
-                # Filter for High Quality: Large faces and frontal pose
-                # InsightFace pose is (pitch, yaw, roll)
+                # Take the most prominent face
                 face = faces[0]
-                pose = getattr(face, 'pose', [0,0,0])
-                
-                # Simple frontal check: absolute yaw/pitch/roll should be small
-                if any(abs(p) > 25 for p in pose): 
-                    # Skip profile or extreme angles for cleaner dataset
-                    continue
                 
                 # Check for "large enough" face to avoid blurry small detections
                 bbox = face.bbox
                 if (bbox[2]-bbox[0]) < 80: continue
 
                 celeb_data[person_name]['face'].append(face.embedding)
-                celeb_data[person_name]['clip'].append(get_clip_embedding(img))
                 celeb_data[person_name]['gender'].append(face.gender)
                 celeb_data[person_name]['age'].append(face.age)
 
-    # 2. Cluster & Centroid Calculation
+    # Calculate Centroids
     final_db = []
     for person_name, data in celeb_data.items():
         if not data['face']:
             continue
             
-        # Calculate mean Face and CLIP embeddings (Centroids)
-        # We normalize again after averaging to keep them on the unit hypersphere
+        # Calculate mean Face embedding
         avg_face = np.mean(data['face'], axis=0)
         avg_face /= np.linalg.norm(avg_face)
         
-        avg_clip = np.mean(data['clip'], axis=0)
-        avg_clip /= np.linalg.norm(avg_clip)
-        
         # Most frequent gender (Mode)
-        avg_gender = round(np.mean(data['gender']))
+        avg_gender = int(round(np.mean(data['gender'])))
         
         # Average age
-        avg_age = np.mean(data['age'])
+        avg_age = int(round(np.mean(data['age'])))
         
-        # Save as a single robust entry for this celebrity
-        final_db.append((person_name, avg_face, avg_clip, avg_gender, avg_age))
+        # Save entry
+        final_db.append((person_name, avg_face, avg_gender, avg_age))
 
     if final_db:
         save_db(final_db)
-        print(f"Successfully upgraded database! Created centroids for {len(final_db)} celebrities.")
-        print(f"Total entries reduced from images -> celebrities for faster matching.")
+        print(f"Successfully built database for {len(final_db)} celebrities.")
     else:
-        print("No high-quality frontal faces found. Database not created.")
+        print("No faces found. Database not created.")
 
 if __name__ == "__main__":
     build_database()

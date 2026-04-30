@@ -2,7 +2,6 @@ import cv2
 import numpy as np
 from collections import deque
 from core.face_engine import get_faces
-from core.clip_engine import get_clip_embedding
 from core.matcher import find_match
 from core.database import load_db
 
@@ -140,9 +139,11 @@ def draw_premium_ui(frame, x1, y1, x2, y2, face_id, gender_str, age, results):
     cv2.putText(frame, f"{gender_str} | {int(age)}y", (x1, y2 + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
 
 def start_webcam():
-    print("Loading Phase 6 Premium UI experience...")
+    print("Starting New Engine Webcam experience (InsightFace + MediaPipe)...")
     db = load_db()
-    if not db: return
+    if not db: 
+        print("Error: No database found. Run --build first.")
+        return
 
     tracker = FaceTracker()
     face_frames_counter = {}
@@ -159,10 +160,10 @@ def start_webcam():
         for face_id, face in tracked_results:
             if face_id not in face_frames_counter: face_frames_counter[face_id] = 0
             
-            # Heavy matching every 4 frames (slightly faster than 5 for better responsiveness)
+            # Matching logic (No CLIP)
             if face_frames_counter[face_id] % 4 == 0:
                 face_histories.setdefault(face_id, deque(maxlen=10)).append(
-                    find_match(face.embedding, get_clip_embedding(frame), face.gender, face.age, db, k=5)
+                    find_match(face.embedding, face.gender, face.age, db, k=5)
                 )
             face_frames_counter[face_id] += 1
             
@@ -173,7 +174,7 @@ def start_webcam():
             draw_premium_ui(frame, bbox[0], bbox[1], bbox[2], bbox[3], face_id, 
                             "Male" if face.gender == 1 else "Female", face.age, smoothed)
         
-        cv2.imshow("SpyBeast07 Celeb Lookalike - Premium", frame)
+        cv2.imshow("SpyBeast07 Celeb Lookalike - New Engine", frame)
         if cv2.waitKey(1) == 27: break
             
     cap.release()

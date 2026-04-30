@@ -4,7 +4,7 @@
 # Python
 __pycache__/
 *.pyc
-backend/env/
+backend/venv/
 backend/data/*
 backend/models/*
 

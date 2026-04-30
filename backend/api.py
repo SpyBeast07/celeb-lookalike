@@ -3,18 +3,16 @@ import numpy as np
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from core.face_engine import get_faces
-from core.clip_engine import get_clip_embedding
 from core.matcher import find_match
 from core.database import load_db
 import io
-from PIL import Image
 
-app = FastAPI(title="Celeb Lookalike API")
+app = FastAPI(title="Celeb Lookalike API - New Engine")
 
 # Configure CORS for Svelte frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify the frontend URL
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -33,7 +31,7 @@ async def startup_event():
 
 @app.get("/")
 async def root():
-    return {"message": "Celeb Lookalike API is running"}
+    return {"message": "Celeb Lookalike API is running with new engine (InsightFace + MediaPipe)"}
 
 @app.post("/analyze")
 async def analyze_face(file: UploadFile = File(...)):
@@ -48,7 +46,7 @@ async def analyze_face(file: UploadFile = File(...)):
     if frame is None:
         return {"error": "Invalid image format"}
 
-    # Detect faces
+    # Detect faces using the new engine (InsightFace + MediaPipe)
     detections = get_faces(frame)
     
     if not detections:
@@ -56,13 +54,9 @@ async def analyze_face(file: UploadFile = File(...)):
 
     results = []
     for face in detections:
-        # Get CLIP embedding for multimodal matching
-        clip_embedding = get_clip_embedding(frame)
-        
-        # Find matches
+        # Find matches using updated matcher (Face + Attributes, No CLIP)
         matches = find_match(
             face.embedding, 
-            clip_embedding, 
             face.gender, 
             face.age, 
             db, 

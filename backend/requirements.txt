@@ -1,13 +1,7 @@
 insightface
 onnxruntime
 opencv-python
+mediapipe
 numpy
+scipy
 scikit-learn
-tqdm
-pillow
-torch
-torchvision
-open_clip_torch
-fastapi
-uvicorn
-python-multipart
