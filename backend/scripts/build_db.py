@@ -11,7 +11,7 @@ DEFAULT_RAW_PATH = os.path.join(BASE_DIR, "data", "raw")
 def build_database(raw_path=DEFAULT_RAW_PATH):
     """
     Build celebrity database using the new engine (InsightFace + MediaPipe).
-    Calculates centroids per celebrity based on face embeddings.
+    Now stores Face Embeddings, Landmark Vectors, and Attributes.
     """
     if not os.path.exists(raw_path):
         print(f"Error: {raw_path} directory not found.")
@@ -20,11 +20,11 @@ def build_database(raw_path=DEFAULT_RAW_PATH):
     celeb_data = {}
     
     folders = [f for f in os.listdir(raw_path) if os.path.isdir(os.path.join(raw_path, f))]
-    print(f"Processing {len(folders)} celebrities for the new engine...")
+    print(f"Phase 4: Extracting structural landmarks for {len(folders)} celebrities...")
 
     for person_name in tqdm(folders):
         person_dir = os.path.join(raw_path, person_name)
-        celeb_data[person_name] = {'face': [], 'gender': [], 'age': []}
+        celeb_data[person_name] = {'face': [], 'landmark': [], 'gender': [], 'age': []}
         
         for img_name in os.listdir(person_dir):
             if not img_name.lower().endswith(('.png', '.jpg', '.jpeg')):
@@ -36,14 +36,15 @@ def build_database(raw_path=DEFAULT_RAW_PATH):
             
             faces = get_faces(img)
             if faces:
-                # Take the most prominent face
                 face = faces[0]
                 
-                # Check for "large enough" face to avoid blurry small detections
+                # Filter for "large enough" face
                 bbox = face.bbox
                 if (bbox[2]-bbox[0]) < 80: continue
 
                 celeb_data[person_name]['face'].append(face.embedding)
+                if hasattr(face, 'landmark_vector'):
+                    celeb_data[person_name]['landmark'].append(face.landmark_vector)
                 celeb_data[person_name]['gender'].append(face.gender)
                 celeb_data[person_name]['age'].append(face.age)
 
@@ -53,22 +54,28 @@ def build_database(raw_path=DEFAULT_RAW_PATH):
         if not data['face']:
             continue
             
-        # Calculate mean Face embedding
+        # 1. Face Centroid
         avg_face = np.mean(data['face'], axis=0)
         avg_face /= np.linalg.norm(avg_face)
         
-        # Most frequent gender (Mode)
+        # 2. Landmark Centroid (Phase 5: Robust Averaging)
+        if data['landmark']:
+            # Explicitly convert to numpy array and average to avoid inhomogeneous shape errors
+            landmarks_array = np.array(data['landmark'], dtype=np.float32)
+            avg_landmark = np.mean(landmarks_array, axis=0).tolist()
+        else:
+            avg_landmark = None
+            
+        # 3. Attributes
         avg_gender = int(round(np.mean(data['gender'])))
-        
-        # Average age
         avg_age = int(round(np.mean(data['age'])))
         
-        # Save entry
-        final_db.append((person_name, avg_face, avg_gender, avg_age))
+        # Save entry: (name, face_emb, landmark_vec, gender, age)
+        final_db.append((person_name, avg_face, avg_landmark, avg_gender, avg_age))
 
     if final_db:
         save_db(final_db)
-        print(f"Successfully built database for {len(final_db)} celebrities.")
+        print(f"Successfully built Phase 4 database for {len(final_db)} celebrities.")
     else:
         print("No faces found. Database not created.")
 

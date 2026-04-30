@@ -54,11 +54,14 @@ async def analyze_face(file: UploadFile = File(...)):
 
     results = []
     for face in detections:
-        # Find matches using updated matcher (Face + Attributes, No CLIP)
+        landmark_vector = getattr(face, 'landmark_vector', None)
+        
+        # Find matches using updated matcher (Face + Landmarks + Attributes)
         matches = find_match(
             face.embedding, 
             face.gender, 
             face.age, 
+            landmark_vector,
             db, 
             k=5
         )

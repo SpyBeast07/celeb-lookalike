@@ -39,8 +39,8 @@ celeb-lookalike/
    python3 -m venv env
    ```
 3. Activate the virtual environment:
-   - **Mac/Linux**: `source env/bin/activate`
-   - **Windows**: `env\Scripts\activate`
+   - **Mac/Linux**: `source venv/bin/activate`
+   - **Windows**: `venv\Scripts\activate`
 4. Install dependencies:
    ```bash
    pip install -r requirements.txt
@@ -62,13 +62,13 @@ celeb-lookalike/
 Add celebrity images to `backend/data/raw/` (each celebrity in their own folder) and run:
 ```bash
 cd backend
-./env/bin/python main.py --build
+./venv/bin/python main.py --build
 ```
 
 ### 2. Start the Backend Server
 ```bash
 cd backend
-./env/bin/python main.py --server
+./venv/bin/python main.py --server
 ```
 
 ### 3. Start the Frontend

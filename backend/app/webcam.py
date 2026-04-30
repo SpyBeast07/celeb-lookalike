@@ -11,7 +11,7 @@ class FaceTracker:
         self.tracked_faces = {} # {id: (centroid, face_obj)}
         self.disappeared = {}
         self.max_disappear = max_disappear
-        self.smoothed_bboxes = {} # {id: bbox} for smooth transitions
+        self.smoothed_bboxes = {} 
 
     def update(self, detections):
         if not detections:
@@ -48,9 +48,8 @@ class FaceTracker:
                 if D[r, c] > 150: continue
 
                 fid = fids[r]
-                # Smooth bbox transition
                 old_bbox = self.tracked_faces[fid][1].bbox if self.tracked_faces[fid][1] is not None else detections[c].bbox
-                alpha = 0.3 # Smoothing factor
+                alpha = 0.3 
                 smoothed_bbox = alpha * detections[c].bbox + (1 - alpha) * old_bbox
                 detections[c].bbox = smoothed_bbox
                 
@@ -82,8 +81,10 @@ class FaceTracker:
             del self.tracked_faces[fid]
             del self.disappeared[fid]
             if fid in face_histories: del face_histories[fid]
+            if fid in feature_buffers: del feature_buffers[fid]
 
 face_histories = {} 
+feature_buffers = {} # Phase 6: Stability buffer
 
 def average_scores(history_buffer):
     if not history_buffer: return []
@@ -95,7 +96,7 @@ def average_scores(history_buffer):
     return sorted(avg, key=lambda x: x[1], reverse=True)
 
 def draw_premium_ui(frame, x1, y1, x2, y2, face_id, gender_str, age, results):
-    # 1. Tech Bounding Box
+    # Premium UI Drawing logic
     color = (0, 255, 0) if results[0][1] > 0.4 else (0, 200, 255)
     cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), 1)
     l = 25
@@ -103,43 +104,30 @@ def draw_premium_ui(frame, x1, y1, x2, y2, face_id, gender_str, age, results):
                    ((x1,y2),(x1+l,y2)), ((x1,y2),(x1,y2-l)), ((x2,y2),(x2-l,y2)), ((x2,y2),(x2,y2-l))]:
         cv2.line(frame, p1, p2, color, 3)
 
-    # 2. Match Banner
     main_match, main_score = results[0]
     banner_text = f"HOT MATCH: {main_match}" if main_score > 0.45 else f"LOOKS LIKE: {main_match}"
     
-    # Header Overlay
     overlay = frame.copy()
     cv2.rectangle(overlay, (x1, y1 - 100), (x1 + 250, y1), (0, 0, 0), -1)
     cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
-    
     cv2.putText(frame, banner_text, (x1 + 5, y1 - 75), cv2.FONT_HERSHEY_DUPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
 
-    # 3. Confidence Bars
     for i, (name, score) in enumerate(results[:3]):
         bar_x = x1 + 5
         bar_y = y1 - 55 + i*18
         bar_w = 120
         bar_h = 8
-        
-        # Draw Name
         cv2.putText(frame, f"{name[:15]}", (bar_x, bar_y + 8), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1, cv2.LINE_AA)
-        
-        # Draw Bar Background
         cv2.rectangle(frame, (bar_x + 100, bar_y), (bar_x + 100 + bar_w, bar_y + bar_h), (50, 50, 50), -1)
-        
-        # Draw Progress
-        progress = int(bar_w * score)
+        progress = int(bar_w * min(score, 1.0))
         bar_color = (0, 255, 0) if i == 0 else (0, 200, 255)
         cv2.rectangle(frame, (bar_x + 100, bar_y), (bar_x + 100 + progress, bar_y + bar_h), bar_color, -1)
-        
-        # Draw %
         cv2.putText(frame, f"{int(score*100)}%", (bar_x + 100 + bar_w + 5, bar_y + 8), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
 
-    # 4. User Meta
     cv2.putText(frame, f"{gender_str} | {int(age)}y", (x1, y2 + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
 
 def start_webcam():
-    print("Starting New Engine Webcam experience (InsightFace + MediaPipe)...")
+    print("Starting New Engine Webcam experience (Phases 5 & 6)...")
     db = load_db()
     if not db: 
         print("Error: No database found. Run --build first.")
@@ -160,11 +148,25 @@ def start_webcam():
         for face_id, face in tracked_results:
             if face_id not in face_frames_counter: face_frames_counter[face_id] = 0
             
-            # Matching logic (No CLIP)
+            # Phase 6: Buffer Raw Features
+            buf = feature_buffers.setdefault(face_id, {'emb': deque(maxlen=5), 'landmark': deque(maxlen=5)})
+            buf['emb'].append(face.embedding)
+            if hasattr(face, 'landmark_vector'):
+                buf['landmark'].append(face.landmark_vector)
+            
+            # Matching logic using averaged features
             if face_frames_counter[face_id] % 4 == 0:
-                face_histories.setdefault(face_id, deque(maxlen=10)).append(
-                    find_match(face.embedding, face.gender, face.age, db, k=5)
-                )
+                # Calculate means
+                final_emb = np.mean(buf['emb'], axis=0)
+                final_emb /= np.linalg.norm(final_emb) # Normalize averaged embedding
+                
+                final_landmark = None
+                if buf['landmark']:
+                    final_landmark = np.mean(buf['landmark'], axis=0).tolist()
+                
+                matches = find_match(final_emb, face.gender, face.age, final_landmark, db, k=5)
+                face_histories.setdefault(face_id, deque(maxlen=10)).append(matches)
+                
             face_frames_counter[face_id] += 1
             
             smoothed = average_scores(face_histories.get(face_id, []))
@@ -174,7 +176,7 @@ def start_webcam():
             draw_premium_ui(frame, bbox[0], bbox[1], bbox[2], bbox[3], face_id, 
                             "Male" if face.gender == 1 else "Female", face.age, smoothed)
         
-        cv2.imshow("SpyBeast07 Celeb Lookalike - New Engine", frame)
+        cv2.imshow("SpyBeast07 Celeb Lookalike - Hybrid Engine", frame)
         if cv2.waitKey(1) == 27: break
             
     cap.release()
