@@ -7,66 +7,57 @@ A real-time face recognition application that identifies your celebrity lookalik
 - **Real-time Face Detection**: High-performance face detection using InsightFace.
 - **Face Embeddings**: Robust face feature extraction.
 - **Fast Matching**: Efficient similarity matching against a database of celebrities.
-- **Database Builder**: Easy-to-use script to build your own celebrity database from raw images.
+- **Svelte Frontend**: Modern web interface for real-time lookalike detection.
+- **Database Builder**: Easy-to-use script to build your own celebrity database.
 
 ## 📁 Project Structure
 
 ```
 celeb-lookalike/
-├── data/
-│   ├── raw/              # Place your celebrity images here (organized by folder)
-│   └── processed/        # Cleaned dataset (optional)
-├── models/               # Saved embeddings (e.g., embeddings.pkl)
-├── core/
-│   ├── face_engine.py    # InsightFace initialization and detection
-│   ├── clip_engine.py    # CLIP embeddings for multimodal search (future)
-│   ├── matcher.py        # Cosine similarity matching logic
-│   └── database.py       # Load/Save operations for embeddings
-├── app/
-│   └── webcam.py         # Real-time webcam UI
-├── scripts/
-│   └── build_db.py       # Script to build the embedding database
-├── requirements.txt
-└── main.py               # Main entry point
+├── backend/              # Python FastAPI backend
+│   ├── app/              # Application logic
+│   ├── core/             # Core engines (Face, CLIP, Matcher)
+│   ├── data/             # Celebrity images and processed data
+│   ├── models/           # Saved embeddings
+│   ├── scripts/          # Utility scripts (database builder)
+│   ├── main.py           # Entry point
+│   └── requirements.txt  # Backend dependencies
+├── frontend/             # SvelteKit frontend
+├── README.md             # Project overview
+└── .gitignore            # Git ignore rules
 ```
 
-## 🛠️ Environment Setup
+## 🛠️ Setup
 
-1. **Create and Activate Environment**:
-   ```bash
-   python -m venv env
-   source env/bin/activate  # On Windows: env\Scripts\activate
-   ```
+### Backend Setup
+1. `cd backend`
+2. `python -m venv env`
+3. `source env/bin/activate` (or `env\Scripts\activate` on Windows)
+4. `pip install -r requirements.txt`
 
-2. **Install Dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+### Frontend Setup
+1. `cd frontend`
+2. `npm install`
 
 ## 📖 Usage
 
-### 1. Prepare Celebrity Data
-Add images to `celeb-lookalike/data/raw/` in the following format:
-```
-data/raw/
-├── Celebrity Name 1/
-│   ├── image1.jpg
-│   └── image2.jpg
-└── Celebrity Name 2/
-    ├── image1.jpg
-    └── image2.jpg
-```
-
-### 2. Build the Face Database
-This script processes the raw images and saves embeddings to `models/embeddings.pkl`.
+### 1. Build the Face Database
+Add images to `backend/data/raw/` and run:
 ```bash
+cd backend
 python main.py --build
 ```
 
-### 3. Start the Webcam App
-Identify your celebrity lookalike in real-time!
+### 2. Start the Application
+Run the backend server:
 ```bash
-python main.py --run
+cd backend
+python main.py --server
+```
+Then start the frontend:
+```bash
+cd frontend
+npm run dev
 ```
 
 ## 📜 License

@@ -8,6 +8,7 @@ def main():
     parser.add_argument("--build", action="store_true", help="Build the embedding database")
     parser.add_argument("--data", type=str, default="data/raw", help="Path to raw data for building database")
     parser.add_argument("--run", action="store_true", help="Start the webcam app")
+    parser.add_argument("--server", action="store_true", help="Start the FastAPI server")
     
     args = parser.parse_args()
     
@@ -15,6 +16,10 @@ def main():
         build_database(args.data)
     elif args.run:
         start_webcam()
+    elif args.server:
+        import uvicorn
+        from api import app
+        uvicorn.run(app, host="0.0.0.0", port=8000)
     else:
         parser.print_help()
 

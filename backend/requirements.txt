@@ -8,3 +8,6 @@ pillow
 torch
 torchvision
 open_clip_torch
+fastapi
+uvicorn
+python-multipart

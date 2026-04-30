@@ -6,7 +6,10 @@ from core.face_engine import get_faces
 from core.clip_engine import get_clip_embedding
 from core.database import save_db
 
-def build_database(raw_path="data/raw"):
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_RAW_PATH = os.path.join(BASE_DIR, "data", "raw")
+
+def build_database(raw_path=DEFAULT_RAW_PATH):
     """
     Phase 7 Upgrade: Cluster embeddings per celebrity.
     Instead of multiple entries, we store one 'Centroid' embedding per celeb.
