@@ -41,6 +41,20 @@
     }
   }
 
+  async function fetchCelebImage(name: string) {
+    try {
+      const cleanName = name.replace(" (C)", "");
+      const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(cleanName)}&prop=pageimages&format=json&pithumbsize=400&origin=*`);
+      const data = await res.json();
+      const pages = data.query.pages;
+      const pageId = Object.keys(pages)[0];
+      return pages[pageId].thumbnail?.source || null;
+    } catch (err) {
+      console.error("Image fetch error:", err);
+      return null;
+    }
+  }
+
   async function handleFind() {
     if (!videoElement) return;
 
@@ -71,8 +85,23 @@
 
       if (data.results && data.results.length > 0) {
         const topFace = data.results[0];
-        actors = topFace.matches.slice(0, 5).map((m: any) => ({ name: m.name, confidence: m.confidence }));
-        cartoons = topFace.matches.slice(0, 5).map((m: any) => ({ name: m.name + " (C)", confidence: m.confidence * 0.95 }));
+        
+        // Fetch images for all matches
+        const actorPromises = topFace.matches.slice(0, 5).map(async (m: any) => ({
+          name: m.name,
+          confidence: m.confidence,
+          image: await fetchCelebImage(m.name)
+        }));
+        
+        const cartoonPromises = topFace.matches.slice(0, 5).map(async (m: any) => ({
+          name: m.name + " (C)",
+          confidence: m.confidence * 0.95,
+          image: await fetchCelebImage(m.name)
+        }));
+
+        actors = await Promise.all(actorPromises);
+        cartoons = await Promise.all(cartoonPromises);
+        
         selectedMatch = actors[0];
         resultsFound = true;
       }
@@ -147,7 +176,9 @@
             <!-- Match Side -->
             <div class="projection-part match-side">
               <div class={projectionStep === 1 ? 'avatar-large' : 'avatar-medium'}>
-                <!-- Match image will go here -->
+                {#if selectedMatch?.image}
+                  <img src={selectedMatch.image} alt={selectedMatch.name} class="avatar-img" />
+                {/if}
               </div>
             </div>
           </div>
@@ -311,6 +342,12 @@
     margin-top: 15px;
     color: #fff;
     transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .avatar-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
 
   .idle-message {

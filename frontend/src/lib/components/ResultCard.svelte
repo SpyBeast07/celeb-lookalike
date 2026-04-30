@@ -1,6 +1,6 @@
 <script lang="ts">
   interface Props {
-    item?: { name: string; confidence: number };
+    item?: { name: string; confidence: number; image?: string | null };
     type?: 'actor' | 'cartoon' | 'skeleton';
     selected?: boolean;
     shimmer?: boolean;
@@ -20,7 +20,11 @@
 >
   <div class="avatar-box">
     {#if type !== 'skeleton'}
-      <div class="avatar-placeholder"></div>
+      {#if item?.image}
+        <img src={item.image} alt={item.name} class="avatar-img" />
+      {:else}
+        <div class="avatar-placeholder"></div>
+      {/if}
     {/if}
   </div>
   
@@ -69,6 +73,13 @@
     border-radius: 6px;
     margin-bottom: 10px;
     border: 1px solid rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+  }
+
+  .avatar-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
 
   .info {
