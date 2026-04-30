@@ -41,14 +41,47 @@
     }
   }
 
-  async function fetchCelebImage(name: string) {
+  async function fetchCelebImage(name: string, age?: number) {
     try {
       const cleanName = name.replace(" (C)", "");
-      const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(cleanName)}&prop=pageimages&format=json&pithumbsize=400&origin=*`);
-      const data = await res.json();
-      const pages = data.query.pages;
-      const pageId = Object.keys(pages)[0];
-      return pages[pageId].thumbnail?.source || null;
+      
+      // 1. Try DIRECT lookup first - most reliable for exact celebrity names
+      const directUrl = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(cleanName)}&prop=pageimages&format=json&pithumbsize=600&redirects=1&origin=*`;
+      const directRes = await fetch(directUrl);
+      const directData = await directRes.json();
+      
+      if (directData.query && directData.query.pages) {
+        const pages = directData.query.pages;
+        const pageId = Object.keys(pages)[0];
+        if (pageId !== "-1" && pages[pageId].thumbnail) {
+          return pages[pageId].thumbnail.source;
+        }
+      }
+
+      // 2. Fallback to SEARCH if direct title doesn't exist or has no image
+      let searchQuery = cleanName;
+      if (age) {
+        searchQuery = `${cleanName} ${age} years old portrait`;
+      } else {
+        searchQuery = `${cleanName} portrait`;
+      }
+
+      const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(searchQuery)}&gsrlimit=1&prop=pageimages&format=json&pithumbsize=600&origin=*`;
+      const searchRes = await fetch(searchUrl);
+      const searchData = await searchRes.json();
+      
+      if (searchData.query && searchData.query.pages) {
+        const pages = searchData.query.pages;
+        const pageId = Object.keys(pages)[0];
+        const page = pages[pageId];
+        
+        // Verify if the result is relevant by checking if the name is in the title
+        if (page.title.toLowerCase().includes(cleanName.split(' ')[0].toLowerCase())) {
+          return page.thumbnail?.source || null;
+        }
+      }
+      
+      return null;
     } catch (err) {
       console.error("Image fetch error:", err);
       return null;
@@ -85,18 +118,19 @@
 
       if (data.results && data.results.length > 0) {
         const topFace = data.results[0];
+        const detectedAge = topFace.age;
         
         // Fetch images for all matches
         const actorPromises = topFace.matches.slice(0, 5).map(async (m: any) => ({
           name: m.name,
           confidence: m.confidence,
-          image: await fetchCelebImage(m.name)
+          image: await fetchCelebImage(m.name, detectedAge)
         }));
         
         const cartoonPromises = topFace.matches.slice(0, 5).map(async (m: any) => ({
           name: m.name + " (C)",
           confidence: m.confidence * 0.95,
-          image: await fetchCelebImage(m.name)
+          image: await fetchCelebImage(m.name, detectedAge)
         }));
 
         actors = await Promise.all(actorPromises);
