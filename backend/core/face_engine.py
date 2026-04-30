@@ -20,13 +20,14 @@ class NewFaceEngine:
 
     def get_faces(self, frame):
         """Detect faces and extract embeddings + mediapipe landmarks."""
-        # 1. InsightFace Detections & Embeddings
+        # 1. Face Detection & Alignment & Embedding (InsightFace / ArcFace)
+        # InsightFace's app.get handles Detection, Alignment, and Embedding in one pass.
         faces = self.app.get(frame)
         
         if not faces:
             return []
             
-        # 2. Add MediaPipe landmarks to each face
+        # 2. Landmarks Extraction (MediaPipe Face Mesh)
         # Convert BGR to RGB for MediaPipe
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mesh_results = self.face_mesh.process(rgb_frame)
