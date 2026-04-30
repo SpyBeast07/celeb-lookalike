@@ -24,23 +24,23 @@
     }
   }
 
-  const actors = [
+  let actors = $state([
     { name: 'Brad Pitt', confidence: 0.95 },
     { name: 'Tom Cruise', confidence: 0.88 },
     { name: 'Johnny Depp', confidence: 0.82 },
     { name: 'Leonardo DiCaprio', confidence: 0.75 },
     { name: 'Robert Downey Jr.', confidence: 0.68 }
-  ];
+  ]);
 
-  const cartoons = [
+  let cartoons = $state([
     { name: 'Sherlock Holmes', confidence: 0.92 },
     { name: 'Batman', confidence: 0.85 },
     { name: 'Spider-Man', confidence: 0.78 },
     { name: 'Iron Man', confidence: 0.70 },
     { name: 'Jack Sparrow', confidence: 0.65 }
-  ];
+  ]);
 
-  function handleFind() {
+  async function handleFind() {
     if (!videoElement) return;
 
     // Capture the current frame to a canvas
@@ -49,22 +49,51 @@
     canvas.height = videoElement.videoHeight;
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      // Draw raw frame; the .webcam-video CSS class will handle mirroring 
-      // the display for the user, matching the live preview.
       ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-      
-      // Get base64 image
       capturedImage = canvas.toDataURL('image/jpeg');
     }
 
     isFinding = true;
     resultsFound = false;
-    
-    // Simulate finding process
-    setTimeout(() => {
-      isFinding = false;
+
+    try {
+      // 1. Convert base64 to Blob
+      const response = await fetch(capturedImage!);
+      const blob = await response.blob();
+
+      // 2. Prepare FormData
+      const formData = new FormData();
+      formData.append('file', blob, 'capture.jpg');
+
+      // 3. Call Backend
+      const apiRes = await fetch('http://localhost:8000/analyze', {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await apiRes.json();
+
+      if (data.results && data.results.length > 0) {
+        const topFace = data.results[0];
+        // Populate actors and cartoons with the results
+        actors = topFace.matches.slice(0, 5).map((m: any) => ({
+          name: m.name,
+          confidence: m.confidence
+        }));
+        
+        cartoons = topFace.matches.slice(0, 5).map((m: any) => ({
+          name: m.name + " (C)", // Mock differentiation for now
+          confidence: m.confidence * 0.95
+        }));
+      }
+
       resultsFound = true;
-    }, 2000);
+    } catch (err) {
+      console.error("Backend Error:", err);
+      alert("Backend connection failed! Make sure the server is running on port 8000.");
+    } finally {
+      isFinding = false;
+    }
   }
 </script>
 
@@ -188,17 +217,6 @@
 </div>
 
 <style>
-  .placeholder-text {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: rgba(255, 255, 255, 0.05);
-    font-size: 0.7rem;
-    letter-spacing: 5px;
-  }
-
   .scanning-animation {
     text-align: center;
   }
