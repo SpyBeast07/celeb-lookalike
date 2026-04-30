@@ -8,52 +8,60 @@ def cosine(a, b):
         return 0
     return np.dot(a, b) / (norm_a * norm_b)
 
-def find_match(face_query, user_gender, user_age, landmark_query, db, k=5):
+def find_match(face_query, user_gender, user_age, landmark_query, db, category_filter=None, k=5):
     """
-    Phase 5: Hybrid Similarity Engine
-    Score = 0.6 * Embedding Similarity + 0.4 * Landmark Similarity
+    Phase 9: Separate Pipelines
+    Supports filtering by category (actors vs cartoons).
     """
     scores = []
     for entry in db:
-        # entry: (name, face_emb, landmark_vec, gender, age)
-        if len(entry) == 5:
+        # entry: (name, face_emb, landmark_vec, gender, age, category)
+        if len(entry) == 6:
+            name, face_emb, celeb_landmark, celeb_gender, celeb_age, category = entry
+        elif len(entry) == 5:
             name, face_emb, celeb_landmark, celeb_gender, celeb_age = entry
-        elif len(entry) == 4:
-            name, face_emb, celeb_gender, celeb_age = entry
-            celeb_landmark = None
+            category = 'actors' # Default fallback
         else:
             name, face_emb = entry[:2]
             celeb_landmark = None
             celeb_gender, celeb_age = 0, 0
+            category = 'actors'
             
-        # 1. Embedding Similarity (60%)
+        # 1. Filter by category if requested
+        if category_filter and category != category_filter:
+            continue
+            
+        # 2. Embedding Similarity (60%)
         emb_sim = cosine(face_query, face_emb)
         
-        # 2. Landmark Similarity (40%)
-        # 1 - Euclidean Distance (Phase 5)
+        # 3. Landmark Similarity (40%)
         landmark_sim = 0.0
         if landmark_query is not None and celeb_landmark is not None:
-            # Landmark similarity = 1 - Euclidean distance
-            # Ensure vectors are numpy arrays for norm calculation
             q_vec = np.array(landmark_query)
             c_vec = np.array(celeb_landmark)
             dist = np.linalg.norm(q_vec - c_vec)
-            # Clip dist to ensure similarity stays within reasonable range (0 to 1)
             landmark_sim = max(0.0, 1.0 - dist)
         else:
-            # Fallback if landmarks are missing
             landmark_sim = emb_sim
 
-        # 3. Attributes (Pre-filter or small bonus)
-        # We use gender as a strong filter: if gender doesn't match, penalize heavily
-        gender_match = 1.0 if user_gender == celeb_gender else 0.0
+        # 4. Phase 8: Attribute Matching (Penalties)
+        penalty = 0.0
         
-        # Final Score calculation
-        # Base score from Embedding and Landmarks
+        # Gender Penalty (-0.3) - Only apply for 'actors' category
+        if category == 'actors' and user_gender != celeb_gender:
+            penalty += 0.3
+            
+        # Age Group Penalty (-0.1) - Only apply for 'actors'
+        if category == 'actors':
+            age_diff = abs(user_age - celeb_age)
+            if age_diff > 15:
+                penalty += 0.1
+        
+        # Base hybrid score
         base_score = (0.6 * emb_sim) + (0.4 * landmark_sim)
         
-        # Apply gender penalty/filter
-        final_score = base_score * (0.8 + 0.2 * gender_match)
+        # Final Score with Penalty
+        final_score = max(0.0, base_score - penalty)
             
         scores.append((name, final_score))
     

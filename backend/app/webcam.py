@@ -127,7 +127,8 @@ def draw_premium_ui(frame, x1, y1, x2, y2, face_id, gender_str, age, results):
     cv2.putText(frame, f"{gender_str} | {int(age)}y", (x1, y2 + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
 
 def start_webcam():
-    print("Starting New Engine Webcam experience (Phases 5 & 6)...")
+    print("Starting New Engine Webcam experience (Phases 5-9)...")
+    print("Controls: 'C' to toggle Actors/Cartoons, 'ESC' to quit")
     db = load_db()
     if not db: 
         print("Error: No database found. Run --build first.")
@@ -135,6 +136,7 @@ def start_webcam():
 
     tracker = FaceTracker()
     face_frames_counter = {}
+    current_category = "actors"
     cap = cv2.VideoCapture(0)
     
     while True:
@@ -164,7 +166,7 @@ def start_webcam():
                 if buf['landmark']:
                     final_landmark = np.mean(buf['landmark'], axis=0).tolist()
                 
-                matches = find_match(final_emb, face.gender, face.age, final_landmark, db, k=5)
+                matches = find_match(final_emb, face.gender, face.age, final_landmark, db, category_filter=current_category, k=5)
                 face_histories.setdefault(face_id, deque(maxlen=10)).append(matches)
                 
             face_frames_counter[face_id] += 1
@@ -176,8 +178,14 @@ def start_webcam():
             draw_premium_ui(frame, bbox[0], bbox[1], bbox[2], bbox[3], face_id, 
                             "Male" if face.gender == 1 else "Female", face.age, smoothed)
         
+        cv2.putText(frame, f"Mode: {current_category.upper()}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
         cv2.imshow("SpyBeast07 Celeb Lookalike - Hybrid Engine", frame)
-        if cv2.waitKey(1) == 27: break
+        
+        key = cv2.waitKey(1)
+        if key == 27: break
+        elif key == ord('c') or key == ord('C'):
+            current_category = "cartoons" if current_category == "actors" else "actors"
+            print(f"Switched to: {current_category}")
             
     cap.release()
     cv2.destroyAllWindows()

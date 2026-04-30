@@ -10,72 +10,67 @@ DEFAULT_RAW_PATH = os.path.join(BASE_DIR, "data", "raw")
 
 def build_database(raw_path=DEFAULT_RAW_PATH):
     """
-    Build celebrity database using the new engine (InsightFace + MediaPipe).
-    Now stores Face Embeddings, Landmark Vectors, and Attributes.
+    Phase 9: Separate Pipelines (Actors vs Cartoons)
+    Builds a unified database with category tags.
     """
     if not os.path.exists(raw_path):
         print(f"Error: {raw_path} directory not found.")
         return
 
-    celeb_data = {}
-    
-    folders = [f for f in os.listdir(raw_path) if os.path.isdir(os.path.join(raw_path, f))]
-    print(f"Phase 4: Extracting structural landmarks for {len(folders)} celebrities...")
-
-    for person_name in tqdm(folders):
-        person_dir = os.path.join(raw_path, person_name)
-        celeb_data[person_name] = {'face': [], 'landmark': [], 'gender': [], 'age': []}
-        
-        for img_name in os.listdir(person_dir):
-            if not img_name.lower().endswith(('.png', '.jpg', '.jpeg')):
-                continue
-                
-            img_path = os.path.join(person_dir, img_name)
-            img = cv2.imread(img_path)
-            if img is None: continue
-            
-            faces = get_faces(img)
-            if faces:
-                face = faces[0]
-                
-                # Filter for "large enough" face
-                bbox = face.bbox
-                if (bbox[2]-bbox[0]) < 80: continue
-
-                celeb_data[person_name]['face'].append(face.embedding)
-                if hasattr(face, 'landmark_vector'):
-                    celeb_data[person_name]['landmark'].append(face.landmark_vector)
-                celeb_data[person_name]['gender'].append(face.gender)
-                celeb_data[person_name]['age'].append(face.age)
-
-    # Calculate Centroids
     final_db = []
-    for person_name, data in celeb_data.items():
-        if not data['face']:
-            continue
-            
-        # 1. Face Centroid
-        avg_face = np.mean(data['face'], axis=0)
-        avg_face /= np.linalg.norm(avg_face)
+    categories = ['actors', 'cartoons']
+    
+    for cat in categories:
+        cat_path = os.path.join(raw_path, cat)
+        if not os.path.exists(cat_path): continue
         
-        # 2. Landmark Centroid (Phase 5: Robust Averaging)
-        if data['landmark']:
-            # Explicitly convert to numpy array and average to avoid inhomogeneous shape errors
-            landmarks_array = np.array(data['landmark'], dtype=np.float32)
-            avg_landmark = np.mean(landmarks_array, axis=0).tolist()
-        else:
+        folders = [f for f in os.listdir(cat_path) if os.path.isdir(os.path.join(cat_path, f))]
+        print(f"Processing {cat} category: {len(folders)} celebrities...")
+
+        for person_name in tqdm(folders):
+            person_dir = os.path.join(cat_path, person_name)
+            faces_embeddings = []
+            landmarks_vectors = []
+            genders = []
+            ages = []
+            
+            for img_name in os.listdir(person_dir):
+                if not img_name.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    continue
+                    
+                img_path = os.path.join(person_dir, img_name)
+                img = cv2.imread(img_path)
+                if img is None: continue
+                
+                faces = get_faces(img)
+                if faces:
+                    face = faces[0]
+                    faces_embeddings.append(face.embedding)
+                    if hasattr(face, 'landmark_vector'):
+                        landmarks_vectors.append(face.landmark_vector)
+                    genders.append(face.gender)
+                    ages.append(face.age)
+
+            if not faces_embeddings: continue
+            
+            # Calculate Centroids
+            avg_face = np.mean(faces_embeddings, axis=0)
+            avg_face /= np.linalg.norm(avg_face)
+            
             avg_landmark = None
+            if landmarks_vectors:
+                landmarks_array = np.array(landmarks_vectors, dtype=np.float32)
+                avg_landmark = np.mean(landmarks_array, axis=0).tolist()
+                
+            avg_gender = int(round(np.mean(genders)))
+            avg_age = int(round(np.mean(ages)))
             
-        # 3. Attributes
-        avg_gender = int(round(np.mean(data['gender'])))
-        avg_age = int(round(np.mean(data['age'])))
-        
-        # Save entry: (name, face_emb, landmark_vec, gender, age)
-        final_db.append((person_name, avg_face, avg_landmark, avg_gender, avg_age))
+            # Entry: (name, face_emb, landmark_vec, gender, age, category)
+            final_db.append((person_name, avg_face, avg_landmark, avg_gender, avg_age, cat))
 
     if final_db:
         save_db(final_db)
-        print(f"Successfully built Phase 4 database for {len(final_db)} celebrities.")
+        print(f"Successfully built Phase 9 database with {len(final_db)} entries.")
     else:
         print("No faces found. Database not created.")
 

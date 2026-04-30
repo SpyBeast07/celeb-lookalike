@@ -34,7 +34,7 @@ async def root():
     return {"message": "Celeb Lookalike API is running with new engine (InsightFace + MediaPipe)"}
 
 @app.post("/analyze")
-async def analyze_face(file: UploadFile = File(...)):
+async def analyze_face(file: UploadFile = File(...), category: str = None):
     if not db:
         return {"error": "Database not loaded. Run --build first."}
 
@@ -56,13 +56,14 @@ async def analyze_face(file: UploadFile = File(...)):
     for face in detections:
         landmark_vector = getattr(face, 'landmark_vector', None)
         
-        # Find matches using updated matcher (Face + Landmarks + Attributes)
+        # Find matches using updated matcher (Face + Landmarks + Attributes + Category)
         matches = find_match(
             face.embedding, 
             face.gender, 
             face.age, 
             landmark_vector,
-            db, 
+            db,
+            category_filter=category,
             k=5
         )
         
