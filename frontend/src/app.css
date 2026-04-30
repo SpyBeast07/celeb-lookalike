@@ -121,23 +121,47 @@ body {
 }
 
 .reset-btn {
-  position: absolute;
-  bottom: 15px;
-  right: 15px;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
+  background: transparent;
+  color: #666;
   border: 1px solid var(--glass-border);
-  padding: 5px 15px;
-  font-size: 0.6rem;
+  padding: 10px 20px;
+  font-size: 0.75rem;
   font-weight: 800;
   border-radius: 4px;
   cursor: pointer;
-  backdrop-filter: blur(5px);
-  z-index: 20;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-right: 10px;
+  transition: all 0.2s ease;
 }
 
 .reset-btn:hover {
-  background: var(--settings-accent);
+  border-color: var(--settings-accent);
+  color: var(--settings-accent);
+}
+
+.skeleton {
+  background: #111;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  opacity: 0.3;
+}
+
+.skeleton.shimmer {
+  background: linear-gradient(90deg, #111 25%, #222 50%, #111 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  opacity: 0.6;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.result-block.selected {
+  background: var(--glass-bg);
+  border-color: var(--cartoon-accent);
+  box-shadow: 0 0 15px rgba(0, 255, 136, 0.2);
 }
 
 .find-button {
