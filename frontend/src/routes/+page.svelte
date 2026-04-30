@@ -7,21 +7,31 @@
   let isFinding = $state(false);
   let resultsFound = $state(false);
   let videoElement: HTMLVideoElement | undefined = $state();
+  let tvVideoElement: HTMLVideoElement | undefined = $state();
   let capturedImage: string | undefined = $state();
   
   let actors = $state<any[]>([]);
   let cartoons = $state<any[]>([]);
   let selectedMatch = $state<any>(null);
   let showOnTV = $state(false);
+  let projectionStep = $state(0); // 0: Idle, 1 or 2 for steps
+
+  let stream: MediaStream | undefined = $state();
 
   onMount(() => {
     startWebcam();
   });
 
+  $effect(() => {
+    if (stream && tvVideoElement && !tvVideoElement.srcObject) {
+      tvVideoElement.srcObject = stream;
+    }
+  });
+
   async function startWebcam() {
     capturedImage = undefined;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
+      stream = await navigator.mediaDevices.getUserMedia({ 
         video: { width: 1280, height: 720 }, 
         audio: false 
       });
@@ -81,6 +91,18 @@
     cartoons = [];
     selectedMatch = null;
     showOnTV = false;
+    projectionStep = 0;
+  }
+
+  function startProjection() {
+    if (!selectedMatch) return;
+    showOnTV = true;
+    projectionStep = 1;
+    
+    // Switch to comparison after 2.5 seconds
+    setTimeout(() => {
+      if (showOnTV) projectionStep = 2;
+    }, 2500);
   }
 </script>
 
@@ -93,40 +115,40 @@
     <div class="left-column">
       <VideoPanel title="Live Feed" accent="#00ff88">
         <!-- svelte-ignore a11y_media_has_caption -->
-        <video 
-          bind:this={videoElement} 
-          autoplay playsinline 
-          class="webcam-video"
-          style:display={capturedImage ? 'none' : 'block'}
-        ></video>
+        <video bind:this={videoElement} autoplay playsinline class="webcam-video"></video>
         {#if capturedImage}
-          <img src={capturedImage} alt="Captured frame" class="webcam-video" />
+          <div class="capture-thumbnail">
+            <img src={capturedImage} alt="Capture" />
+          </div>
         {/if}
       </VideoPanel>
 
       <VideoPanel title="TV Screen" accent="#00ff88">
         {#if isFinding}
           <div class="scanning-indicator">
-            <span class="scan-text">NEURAL SCAN IN PROGRESS...</span>
+            <span class="scan-text">SCANNING FACIAL GEOMETRY...</span>
             <div class="scan-bar"></div>
           </div>
         {:else if showOnTV && selectedMatch}
-          <div class="tv-projection-container">
-            <div class="projection-part source">
-              <div class="avatar-box-mini">
-                {#if capturedImage}
-                  <img src={capturedImage} alt="Source" class="mini-img" />
-                {/if}
+          <div class="tv-projection-container step-{projectionStep}">
+            <!-- Live Feed Side -->
+            <div class="projection-part live-side">
+              <div class="avatar-medium">
+                <!-- svelte-ignore a11y_media_has_caption -->
+                <video bind:this={tvVideoElement} autoplay playsinline class="webcam-video"></video>
               </div>
-              <p class="label">SUBJECT</p>
             </div>
             
-            <div class="projection-arrow">→</div>
+            <!-- Arrow -->
+            <div class="projection-part arrow-side">
+              <div class="big-arrow">&gt;</div>
+            </div>
 
-            <div class="projection-part target">
-              <div class="avatar-box-mini highlight"></div>
-              <p class="name-tag">{selectedMatch.name}</p>
-              <p class="label accent">LOOK-A-LIKE</p>
+            <!-- Match Side -->
+            <div class="projection-part match-side">
+              <div class={projectionStep === 1 ? 'avatar-large' : 'avatar-medium'}>
+                <!-- Match image will go here -->
+              </div>
             </div>
           </div>
         {:else}
@@ -164,7 +186,7 @@
               item={actor} 
               type="actor" 
               selected={selectedMatch === actor} 
-              onclick={() => { selectedMatch = actor; showOnTV = false; }} 
+              onclick={() => { selectedMatch = actor; showOnTV = false; projectionStep = 0; }} 
             />
           {/each}
           {#each cartoons as cartoon}
@@ -172,7 +194,7 @@
               item={cartoon} 
               type="cartoon" 
               selected={selectedMatch === cartoon} 
-              onclick={() => { selectedMatch = cartoon; showOnTV = false; }} 
+              onclick={() => { selectedMatch = cartoon; showOnTV = false; projectionStep = 0; }} 
             />
           {/each}
         {/if}
@@ -186,7 +208,7 @@
           </div>
           <AppButton 
             variant="primary" 
-            onclick={() => showOnTV = true} 
+            onclick={startProjection} 
             disabled={!selectedMatch}
             style="width: 100%; background: var(--accent-color); color: #000;"
           >
@@ -267,27 +289,6 @@
     100% { transform: translateX(100%); }
   }
 
-  .avatar-box-mini {
-    width: 100px;
-    height: 100px;
-    background: #111;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  .avatar-box-mini.highlight {
-    border-color: var(--accent-color);
-    box-shadow: 0 0 20px rgba(0, 255, 136, 0.1);
-  }
-
-  .mini-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    transform: scaleX(-1);
-  }
-
   .label {
     font-size: 0.55rem;
     margin-top: 10px;
@@ -296,16 +297,20 @@
     font-weight: 700;
   }
 
-  .label.accent {
-    color: var(--accent-color);
-    opacity: 1;
-  }
-
   .name-tag {
     font-size: 0.9rem;
     font-weight: 800;
     margin-top: 10px;
     color: #fff;
+    transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .name-tag-large {
+    font-size: 1.8rem;
+    font-weight: 900;
+    margin-top: 15px;
+    color: #fff;
+    transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .idle-message {
