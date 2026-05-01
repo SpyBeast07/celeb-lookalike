@@ -1,7 +1,8 @@
 import cv2
 import numpy as np
-from fastapi import FastAPI, UploadFile, File, Request
+from fastapi import FastAPI, UploadFile, File, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from sse_starlette.sse import EventSourceResponse
 from core.face_engine import get_faces
 from core.matcher import find_match
 from core.database import load_db
@@ -11,6 +12,8 @@ import requests
 import re
 import asyncio
 import torch
+import imagehash
+import json
 from PIL import Image
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -222,12 +225,18 @@ def download_and_validate(url, timeout=3):
         response = requests.get(url, headers=headers, timeout=timeout)
         if response.status_code == 200 and "image" in response.headers.get("Content-Type", "").lower():
             img = Image.open(io.BytesIO(response.content)).convert("RGB")
-            # Don't resize too small here, detection needs detail
             if img.width < 100 or img.height < 100: return None
             return img, url
     except:
         pass
     return None
+
+def get_image_hash(img):
+    """Compute perceptual hash for diversity filtering."""
+    try:
+        return imagehash.phash(img)
+    except:
+        return None
 
 def filter_faces_single(item):
     """Detect faces in a single image."""
@@ -248,12 +257,25 @@ def filter_faces_single(item):
         pass
     return {"image": img, "url": url, "has_face": False}
 
-def filter_faces_batch(candidates):
-    """Process faces sequentially to avoid threading issues with InsightFace."""
+def filter_faces_batch(candidates, query=""):
+    """Process faces sequentially and compute hashes."""
     processed = []
+    seen_hashes = []
+    
     for img, url in candidates:
         try:
-            # Resize for detection (InsightFace likes ~640)
+            # 1. Diversity Check (Perceptual Hash)
+            h = get_image_hash(img)
+            is_duplicate = False
+            if h:
+                for sh in seen_hashes:
+                    if h - sh < 10: # Similarity threshold
+                        is_duplicate = True
+                        break
+            if is_duplicate: continue
+            seen_hashes.append(h)
+
+            # 2. Face Detection
             detect_img = img.copy()
             detect_img.thumbnail((640, 640))
             open_cv_image = cv2.cvtColor(np.array(detect_img), cv2.COLOR_RGB2BGR)
@@ -265,9 +287,10 @@ def filter_faces_batch(candidates):
                 "url": url,
                 "has_face": has_face
             })
+            
+            if len(processed) >= 15: break # Early stop for performance
         except Exception as e:
             print(f"Face filter error for {url}: {e}")
-            processed.append({"image": img, "url": url, "has_face": False})
     return processed
 
 def compute_clip_scores(query, candidates):
@@ -275,7 +298,6 @@ def compute_clip_scores(query, candidates):
     if not candidates:
         return []
         
-    # Prepare images for CLIP (must be 224x224)
     clip_images = [c["image"].resize((224, 224)) for c in candidates]
     
     with torch.no_grad():
@@ -296,6 +318,7 @@ def compute_clip_scores(query, candidates):
         # Boost if it has a face
         if candidate.get("has_face"):
             score *= 1.5
+        
         scored.append({
             "url": candidate["url"],
             "score": score
@@ -304,63 +327,57 @@ def compute_clip_scores(query, candidates):
 
 @app.get("/search_images")
 async def search_images(q: str):
-    try:
-        start_time = time.time()
-        # 1. Check Cache
-        cached_res = search_cache.get(q)
-        if cached_res:
-            print(f"Cache hit for: {q}")
-            return {"results": cached_res}
+    async def event_generator():
+        try:
+            # 1. Check Cache
+            cached_res = search_cache.get(q)
+            if cached_res:
+                yield {"event": "phase2", "data": json.dumps(cached_res)}
+                return
 
-        print(f"Starting deep search for: {q}")
-        
-        # 2. Fetch Candidates
-        candidate_urls = fetch_candidate_images(q, limit=30) 
-        if not candidate_urls:
-            return {"results": []}
-            
-        print(f"Fetched {len(candidate_urls)} candidates in {time.time() - start_time:.2f}s")
-        
-        # 3. Download & Basic Validate in Parallel
-        download_start = time.time()
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            # Download max 20 images to keep it fast and stable
-            results = list(executor.map(download_and_validate, candidate_urls[:20]))
-            downloaded = [r for r in results if r is not None]
-        print(f"Downloaded {len(downloaded)} images in {time.time() - download_start:.2f}s")
+            # PHASE 1: Quick Results (Streaming immediately)
+            candidate_urls = fetch_candidate_images(q, limit=20)
+            phase1_results = []
+            for i, url in enumerate(candidate_urls[:10]):
+                phase1_results.append({
+                    "name": f"{q.title()} (Searching...)",
+                    "confidence": 0.5,
+                    "image": url
+                })
+            yield {"event": "phase1", "data": json.dumps(phase1_results)}
 
-        if not downloaded:
-            return {"results": []}
+            # PHASE 2: Deep Processing (Refining in background)
+            download_start = time.time()
+            downloaded = []
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                results = list(executor.map(lambda u: download_and_validate(u, timeout=2), candidate_urls))
+                downloaded = [r for r in results if r is not None]
 
-        # 4. Face Detection Filter (Sequential for stability)
-        face_start = time.time()
-        processed_candidates = filter_faces_batch(downloaded)
-        print(f"Processed {len(processed_candidates)} images for faces in {time.time() - face_start:.2f}s")
-        
-        # 5. Semantic CLIP Ranking 
-        clip_start = time.time()
-        scored_results = compute_clip_scores(q, processed_candidates) 
-        print(f"CLIP scoring took {time.time() - clip_start:.2f}s")
-        
-        # 6. Final Ranking & Formatting
-        scored_results.sort(key=lambda x: x["score"], reverse=True)
-        
-        final_results = []
-        for i, res in enumerate(scored_results[:10]):
-            count = i + 1
-            final_results.append({
-                "name": f"{q.title()} ({count})" if count > 1 else q.title(),
-                "confidence": 1.0,
-                "image": res["url"]
-            })
+            if downloaded:
+                processed = filter_faces_batch(downloaded, query=q)
+                scored = compute_clip_scores(q, processed)
+                scored.sort(key=lambda x: x["score"], reverse=True)
 
-        print(f"Total search time: {time.time() - start_time:.2f}s")
-        # 7. Cache and Return
-        search_cache.set(q, final_results)
-        return {"results": final_results}
-    except Exception as e:
-        print(f"Search endpoint error: {e}")
-        return {"results": [], "error": str(e)}
+                final_results = []
+                for i, res in enumerate(scored[:10]):
+                    count = i + 1
+                    final_results.append({
+                        "name": f"{q.title()} ({count})" if count > 1 else q.title(),
+                        "confidence": 1.0,
+                        "image": res["url"]
+                    })
+                
+                search_cache.set(q, final_results)
+                yield {"event": "phase2", "data": json.dumps(final_results)}
+            else:
+                # If no images could be downloaded, just repeat phase 1 as phase 2 to end refining
+                yield {"event": "phase2", "data": json.dumps(phase1_results)}
+
+        except Exception as e:
+            print(f"Streaming error: {e}")
+            yield {"event": "error", "data": str(e)}
+
+    return EventSourceResponse(event_generator())
 
 @app.get("/fetch_image")
 async def fetch_image(q: str, type: str = "actor"):

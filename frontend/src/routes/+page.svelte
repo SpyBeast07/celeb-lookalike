@@ -18,11 +18,18 @@
 
 	let manualSelectedImage: string | null = $state(null);
 	let stream: MediaStream | undefined = $state();
+	
+	interface SearchResult {
+		name: string;
+		image: string;
+		confidence: number;
+	}
 
 	// Search feature state
 	let searchQuery = $state('');
 	let isSearching = $state(false);
-	let searchResults = $state<any[]>([]);
+	let isRefining = $state(false);
+	let searchResults = $state<SearchResult[]>([]);
 	let searchMode = $state(false); // true when showing search results instead of AI results
 
 	// Projection state (frozen when "Show Live" is clicked)
@@ -147,51 +154,57 @@
 	}
 
 	// ---- SEARCH FEATURE ----
+	let activeEventSource: EventSource | null = null;
 	// Uses backend DuckDuckGo Images search to return exactly 10 valid results.
-	let searchAbortController: AbortController | null = null;
+	function handleResultClick(result: SearchResult) {
+		selectedMatch = result;
+		manualSelectedImage = null;
+	}
 
 	async function handleSearch() {
 		const query = searchQuery.trim();
 		if (!query) return;
 
 		// Cancel any existing search
-		if (searchAbortController) searchAbortController.abort();
-		searchAbortController = new AbortController();
-
+		if (activeEventSource) activeEventSource.close();
+		
 		isSearching = true;
+		isRefining = false;
 		searchMode = true;
 		searchResults = [];
 		selectedMatch = null;
 		manualSelectedImage = null;
 
-		try {
-			// Set a 30s timeout for the fetch
-			const timeoutId = setTimeout(() => searchAbortController?.abort(), 30000);
+		const url = `http://localhost:8000/search_images?q=${encodeURIComponent(query)}`;
+		activeEventSource = new EventSource(url);
+		const eventSource = activeEventSource;
 
-			const res = await fetch(`http://localhost:8000/search_images?q=${encodeURIComponent(query)}`, {
-				signal: searchAbortController.signal
-			});
-			
-			clearTimeout(timeoutId);
-			const data = await res.json();
-			
-			if (data.results && data.results.length > 0) {
-				searchResults = data.results;
+		eventSource.addEventListener('phase1', (event) => {
+			const data = JSON.parse(event.data);
+			if (data.length > 0) {
+				searchResults = data;
 				selectedMatch = searchResults[0];
-			} else {
-				searchResults = [];
+				isSearching = false;
+				isRefining = true;
 			}
-		} catch (err: any) {
-			if (err.name === 'AbortError') {
-				console.log('Search aborted or timed out');
-			} else {
-				console.error('Search error:', err);
+		});
+
+		eventSource.addEventListener('phase2', (event) => {
+			const data = JSON.parse(event.data);
+			if (data.length > 0) {
+				searchResults = data;
+				selectedMatch = searchResults[0];
 			}
-			searchResults = [];
-		} finally {
+			isRefining = false;
+			eventSource.close();
+		});
+
+		eventSource.addEventListener('error', (event) => {
+			console.error('SSE Error:', event);
 			isSearching = false;
-			searchAbortController = null;
-		}
+			isRefining = false;
+			eventSource.close();
+		});
 	}
 
 	function handleSearchKeydown(e: KeyboardEvent) {
@@ -332,7 +345,7 @@
 					disabled={isSearching || !searchQuery.trim()}
 					style="min-width: 100px;"
 				>
-					{isSearching ? 'Refining…' : 'Search'}
+					{isSearching ? 'Searching…' : (isRefining ? 'Refining…' : 'Search')}
 				</AppButton>
 			</div>
 
@@ -361,7 +374,7 @@
 							item={result}
 							type="actor"
 							selected={selectedMatch === result}
-							onclick={() => selectMatch(result)}
+							onclick={() => handleResultClick(result)}
 						/>
 					{/each}
 					<!-- Fill remaining slots with skeletons if fewer than 10 results -->
