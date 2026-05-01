@@ -59,8 +59,13 @@ def build_database(raw_path=DEFAULT_RAW_PATH):
             
             avg_landmark = None
             if landmarks_vectors:
-                landmarks_array = np.array(landmarks_vectors, dtype=np.float32)
-                avg_landmark = np.mean(landmarks_array, axis=0).tolist()
+                # Ensure all landmark vectors are the same length (4) to avoid inhomogeneous array errors
+                valid_landmarks = [v for v in landmarks_vectors if v is not None and len(v) == 4]
+                if valid_landmarks:
+                    landmarks_array = np.array(valid_landmarks, dtype=np.float32)
+                    avg_landmark = np.mean(landmarks_array, axis=0).tolist()
+                else:
+                    print(f"Warning: No valid landmarks for {person_name}")
                 
             avg_gender = int(round(np.mean(genders)))
             avg_age = int(round(np.mean(ages)))

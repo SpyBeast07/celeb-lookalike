@@ -91,7 +91,10 @@ async def analyze_face(file: UploadFile = File(...), request: Request = None, ca
         
         agg_landmark = None
         if buf['landmark']:
-            agg_landmark = np.mean(buf['landmark'], axis=0).tolist()
+            # Safety check for inhomogeneous shapes
+            valid_lms = [l for l in buf['landmark'] if l is not None and len(l) == 4]
+            if valid_lms:
+                agg_landmark = np.mean(valid_lms, axis=0).tolist()
 
         # 8. Hybrid similarity scoring (Face + Landmarks + Attributes)
         matches = find_match(

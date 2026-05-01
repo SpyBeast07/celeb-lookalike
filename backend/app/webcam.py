@@ -164,7 +164,10 @@ def start_webcam():
                 
                 final_landmark = None
                 if buf['landmark']:
-                    final_landmark = np.mean(buf['landmark'], axis=0).tolist()
+                    # Safety check for inhomogeneous shapes
+                    valid_lms = [l for l in buf['landmark'] if l is not None and len(l) == 4]
+                    if valid_lms:
+                        final_landmark = np.mean(valid_lms, axis=0).tolist()
                 
                 matches = find_match(final_emb, face.gender, face.age, final_landmark, db, category_filter=current_category, k=5)
                 face_histories.setdefault(face_id, deque(maxlen=10)).append(matches)
