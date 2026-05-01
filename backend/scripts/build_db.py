@@ -3,22 +3,31 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 from core.face_engine import get_faces
-from core.database import save_db
+from core.database import save_db, load_db
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_RAW_PATH = os.path.join(BASE_DIR, "data", "raw")
 
-def build_database(raw_path=DEFAULT_RAW_PATH):
+def build_database(raw_path=DEFAULT_RAW_PATH, target_category=None):
     """
     Phase 9: Separate Pipelines (Actors vs Cartoons)
     Builds a unified database with category tags.
+    Supports incremental builds for specific categories.
     """
     if not os.path.exists(raw_path):
         print(f"Error: {raw_path} directory not found.")
         return
 
-    final_db = []
-    categories = ['actors', 'cartoons']
+    # Load existing database if we are doing an incremental build
+    if target_category:
+        existing_db = load_db()
+        # Keep only entries that are NOT in the target category
+        final_db = [entry for entry in existing_db if len(entry) < 6 or entry[5] != target_category]
+        categories = [target_category]
+        print(f"Incremental build: Rebuilding '{target_category}' only. Keeping {len(final_db)} other entries.")
+    else:
+        final_db = []
+        categories = ['actors', 'cartoons']
     
     for cat in categories:
         cat_path = os.path.join(raw_path, cat)

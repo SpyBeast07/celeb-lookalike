@@ -63,6 +63,9 @@ Add celebrity images to `backend/data/raw/` (each celebrity in their own folder)
 ```bash
 cd backend
 ./venv/bin/python main.py --build
+
+# Or build a specific category only (e.g., just cartoons)
+./venv/bin/python main.py --build --category cartoons
 ```
 
 ### 2. Sanitize Images (Optional)

@@ -15,11 +15,12 @@ def main():
     parser.add_argument("--run", action="store_true", help="Start the webcam app")
     parser.add_argument("--server", action="store_true", help="Start the FastAPI server")
     parser.add_argument("--clean", action="store_true", help="Sanitize images to fix metadata issues")
+    parser.add_argument("--category", type=str, default=None, help="Specific category to build (e.g., 'actors' or 'cartoons')")
     
     args = parser.parse_args()
     
     if args.build:
-        build_database(args.data)
+        build_database(args.data, target_category=args.category)
     elif args.clean:
         from scripts.clean_images import clean_dataset
         clean_dataset(args.data)

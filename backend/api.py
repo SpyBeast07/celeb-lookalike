@@ -96,14 +96,24 @@ async def analyze_face(file: UploadFile = File(...), request: Request = None, ca
             if valid_lms:
                 agg_landmark = np.mean(valid_lms, axis=0).tolist()
 
-        # 8. Hybrid similarity scoring (Face + Landmarks + Attributes)
-        matches = find_match(
+        # 8. Hybrid similarity scoring (Separate for Actors and Cartoons)
+        actor_matches = find_match(
             agg_embedding, 
             face.gender, 
             face.age, 
             agg_landmark,
             db,
-            category_filter=category,
+            category_filter="actors",
+            k=5
+        )
+        
+        cartoon_matches = find_match(
+            agg_embedding, 
+            face.gender, 
+            face.age, 
+            agg_landmark,
+            db,
+            category_filter="cartoons",
             k=5
         )
         
@@ -113,7 +123,8 @@ async def analyze_face(file: UploadFile = File(...), request: Request = None, ca
             "bbox": bbox,
             "gender": "Male" if face.gender == 1 else "Female",
             "age": int(face.age),
-            "matches": [{"name": name, "confidence": float(score)} for name, score in matches]
+            "actor_matches": [{"name": name, "confidence": float(score)} for name, score in actor_matches],
+            "cartoon_matches": [{"name": name, "confidence": float(score)} for name, score in cartoon_matches]
         })
 
     return {
