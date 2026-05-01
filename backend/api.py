@@ -199,11 +199,40 @@ def get_ddg_images(query, limit=15):
         print(f"DDG error for {query}: {e}")
         return []
 
+def normalize_input(name: str):
+    """Clean input: remove underscores, tags, and normalize spacing."""
+    name = name.replace('_', ' ').replace('(C)', '').strip()
+    # Remove special characters except spaces
+    name = re.sub(r'[^a-zA-Z0-9\s]', '', name)
+    return ' '.join(name.split())
+
+def generate_search_queries(name: str, type: str = "actor"):
+    """Generate high-quality, face-focused queries with negative filtering."""
+    q = normalize_input(name)
+    
+    if type == "actor":
+        negative_terms = ["-sketch", "-drawing", "-anime", "-cartoon", "-group"]
+        base_queries = [
+            f"{q} face close up portrait",
+            f"{q} headshot front view",
+            f"{q} professional portrait"
+        ]
+    else: # cartoon
+        negative_terms = ["-realistic", "-cosplay", "-live action", "-group"]
+        base_queries = [
+            f"{q} character face portrait",
+            f"{q} official character art",
+            f"{q} anime face close up"
+        ]
+    
+    neg_suffix = " " + " ".join(negative_terms)
+    return [bq + neg_suffix for bq in base_queries]
+
 # --- Advanced Image Search Engine ---
 
-def fetch_candidate_images(q: str, limit: int = 30):
-    """Fetch raw URLs from DDG and Bing with better fallbacks."""
-    queries = [q, f"{q} portrait", f"{q} face headshot"]
+def fetch_candidate_images(q: str, type: str = "actor", limit: int = 30):
+    """Fetch raw URLs from DDG and Bing using optimized queries."""
+    queries = generate_search_queries(q, type)
     all_urls = []
     
     with ThreadPoolExecutor(max_workers=3) as executor:
@@ -308,7 +337,7 @@ def compute_clip_scores(query, candidates):
     return scored
 
 @app.get("/search_images")
-async def search_images(q: str):
+async def search_images(q: str, type: str = "actor"):
     async def event_generator():
         try:
             # 1. Check Cache
@@ -318,7 +347,7 @@ async def search_images(q: str):
                 return
 
             # PHASE 1: Quick Results (Streaming immediately)
-            candidate_urls = fetch_candidate_images(q, limit=20)
+            candidate_urls = fetch_candidate_images(q, type=type, limit=20)
             phase1_results = []
             for i, url in enumerate(candidate_urls[:10]):
                 phase1_results.append({
@@ -356,14 +385,17 @@ async def search_images(q: str):
                 yield {"event": "phase2", "data": json.dumps(phase1_results)}
 
         except Exception as e:
-            print(f"Streaming error: {e}")
-            yield {"event": "error", "data": str(e)}
+            print(f"Streaming error for query '{q}': {e}")
+            # Send an error event to the frontend so it knows to stop
+            yield {"event": "error", "data": json.dumps({"error": str(e)})}
 
     return EventSourceResponse(event_generator())
 
 @app.get("/fetch_image")
 async def fetch_image(q: str, type: str = "actor"):
-    query = f"{q} face portrait" if type == "actor" else f"{q} cartoon character portrait"
+    queries = generate_search_queries(q, type)
+    # Use the first (best) query
+    query = queries[0]
     
     # Try DDG
     try:
