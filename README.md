@@ -5,10 +5,10 @@ A real-time face recognition application that identifies your celebrity lookalik
 ## 🚀 Features
 
 - **Real-time Face Detection**: High-performance face detection using InsightFace.
-- **Face Embeddings**: Robust face feature extraction.
-- **Fast Matching**: Efficient similarity matching against a database of celebrities.
-- **Svelte Frontend**: Modern web interface for real-time lookalike detection.
-- **Database Builder**: Easy-to-use script to build your own celebrity database.
+- **Progressive AI Image Search**: Search for celebrities or characters with a dual-phase streaming pipeline (SSE).
+- **Semantic CLIP Ranking**: Results are ranked using CLIP for visual accuracy.
+- **Diversity Filtering**: Automatic removal of near-duplicate images using perceptual hashing.
+- **Svelte Frontend**: Modern web interface for real-time lookalike detection and streaming search results.
 
 ## 📁 Project Structure
 

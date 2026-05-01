@@ -20,3 +20,7 @@ frontend/.env
 # Build files
 dist/
 build/
+
+# Search and Logs
+search_feedback.json
+*.log

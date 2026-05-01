@@ -8,3 +8,10 @@ scikit-learn
 fastapi
 uvicorn
 python-multipart
+duckduckgo_search
+transformers
+torch
+Pillow
+requests
+imagehash
+sse-starlette

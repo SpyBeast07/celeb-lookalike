@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from fastapi import FastAPI, UploadFile, File, Request, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 from core.face_engine import get_faces
@@ -238,24 +238,6 @@ def get_image_hash(img):
     except:
         return None
 
-def filter_faces_single(item):
-    """Detect faces in a single image."""
-    img, url = item
-    try:
-        # Resize for detection (InsightFace likes ~640)
-        detect_img = img.copy()
-        detect_img.thumbnail((640, 640))
-        open_cv_image = cv2.cvtColor(np.array(detect_img), cv2.COLOR_RGB2BGR)
-        faces = get_faces(open_cv_image)
-        
-        # Loosened rules: If any face is found, it's better than no face
-        if len(faces) > 0:
-            # Sort by bbox area
-            faces.sort(key=lambda x: (x.bbox[2]-x.bbox[0])*(x.bbox[3]-x.bbox[1]), reverse=True)
-            return {"image": img, "url": url, "has_face": True, "face_count": len(faces)}
-    except:
-        pass
-    return {"image": img, "url": url, "has_face": False}
 
 def filter_faces_batch(candidates, query=""):
     """Process faces sequentially and compute hashes."""
