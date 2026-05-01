@@ -10,10 +10,13 @@ import time
 import requests
 import re
 import asyncio
+import torch
+from PIL import Image
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from duckduckgo_search import DDGS
 from datetime import datetime, timedelta
+from transformers import CLIPProcessor, CLIPModel
 
 app = FastAPI(title="Celeb Lookalike API - New Engine")
 
@@ -26,7 +29,7 @@ BUFFER_TIMEOUT = 10.0 # Seconds before resetting buffer
 # Configure CORS for Svelte frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -34,6 +37,13 @@ app.add_middleware(
 
 # Global database variable
 db = None
+
+# --- CLIP Model Loading ---
+print("Loading CLIP model (openai/clip-vit-base-patch32)...")
+device = "cuda" if torch.cuda.is_available() else "cpu"
+clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device)
+clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+print(f"CLIP loaded on {device}")
 
 @app.on_event("startup")
 async def startup_event():
@@ -138,7 +148,7 @@ async def analyze_face(file: UploadFile = File(...), request: Request = None, ca
         "results": results
     }
 
-# --- Image Search Engine Core ---
+# --- Shared Utilities ---
 
 class SearchCache:
     def __init__(self, ttl_seconds=600):
@@ -161,49 +171,6 @@ class SearchCache:
         }
 
 search_cache = SearchCache()
-
-def validate_image_url(url, timeout=1.5):
-    """Check if URL is a valid image with a HEAD request."""
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"}
-        response = requests.head(url, headers=headers, timeout=timeout, allow_redirects=True)
-        if response.status_code == 200:
-            content_type = response.headers.get("Content-Type", "").lower()
-            return "image" in content_type
-    except:
-        pass
-    return False
-
-def rank_image_result(url, query):
-    """
-    Ranks an image result based on URL keywords and relevance to query.
-    Higher score is better.
-    """
-    score = 0
-    url_lower = url.lower()
-    
-    # Positive keywords (Face-focused)
-    face_keywords = ["face", "portrait", "close-up", "headshot", "official", "character"]
-    for kw in face_keywords:
-        if kw in url_lower:
-            score += 20
-            
-    # Resolution/Quality hints in URL
-    if "high" in url_lower or "hd" in url_lower or "large" in url_lower:
-        score += 10
-        
-    # Penalize negative keywords
-    negative_keywords = ["poster", "wallpaper", "group", "full-body", "background", "landscape", "wide"]
-    for kw in negative_keywords:
-        if kw in url_lower:
-            score -= 30
-            
-    # Aspect ratio hints (prefer square-ish for face cards)
-    # We can't know for sure without downloading, but some URLs have hints
-    if "square" in url_lower:
-        score += 15
-
-    return score
 
 def search_bing_images(query, limit=15):
     """Robust scraper for Bing Images."""
@@ -229,74 +196,171 @@ def get_ddg_images(query, limit=15):
         print(f"DDG error for {query}: {e}")
         return []
 
+# --- Advanced Image Search Engine ---
+
+def fetch_candidate_images(q: str, limit: int = 30):
+    """Fetch raw URLs from DDG and Bing with better fallbacks."""
+    queries = [q, f"{q} portrait", f"{q} face headshot"]
+    all_urls = []
+    
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        # Try DDG first (parallel queries)
+        ddg_results = list(executor.map(lambda q: get_ddg_images(q, 15), queries))
+        for res in ddg_results: all_urls.extend(res)
+        
+        # If we have very few, supplement with Bing
+        if len(all_urls) < 10:
+            bing_results = list(executor.map(lambda q: search_bing_images(q, 15), queries))
+            for res in bing_results: all_urls.extend(res)
+
+    return list(dict.fromkeys(all_urls))[:limit]
+
+def download_and_validate(url, timeout=3):
+    """Download image and perform basic validation."""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+        response = requests.get(url, headers=headers, timeout=timeout)
+        if response.status_code == 200 and "image" in response.headers.get("Content-Type", "").lower():
+            img = Image.open(io.BytesIO(response.content)).convert("RGB")
+            # Don't resize too small here, detection needs detail
+            if img.width < 100 or img.height < 100: return None
+            return img, url
+    except:
+        pass
+    return None
+
+def filter_faces_single(item):
+    """Detect faces in a single image."""
+    img, url = item
+    try:
+        # Resize for detection (InsightFace likes ~640)
+        detect_img = img.copy()
+        detect_img.thumbnail((640, 640))
+        open_cv_image = cv2.cvtColor(np.array(detect_img), cv2.COLOR_RGB2BGR)
+        faces = get_faces(open_cv_image)
+        
+        # Loosened rules: If any face is found, it's better than no face
+        if len(faces) > 0:
+            # Sort by bbox area
+            faces.sort(key=lambda x: (x.bbox[2]-x.bbox[0])*(x.bbox[3]-x.bbox[1]), reverse=True)
+            return {"image": img, "url": url, "has_face": True, "face_count": len(faces)}
+    except:
+        pass
+    return {"image": img, "url": url, "has_face": False}
+
+def filter_faces_batch(candidates):
+    """Process faces sequentially to avoid threading issues with InsightFace."""
+    processed = []
+    for img, url in candidates:
+        try:
+            # Resize for detection (InsightFace likes ~640)
+            detect_img = img.copy()
+            detect_img.thumbnail((640, 640))
+            open_cv_image = cv2.cvtColor(np.array(detect_img), cv2.COLOR_RGB2BGR)
+            faces = get_faces(open_cv_image)
+            
+            has_face = len(faces) > 0
+            processed.append({
+                "image": img,
+                "url": url,
+                "has_face": has_face
+            })
+        except Exception as e:
+            print(f"Face filter error for {url}: {e}")
+            processed.append({"image": img, "url": url, "has_face": False})
+    return processed
+
+def compute_clip_scores(query, candidates):
+    """Rank images using CLIP semantic similarity."""
+    if not candidates:
+        return []
+        
+    # Prepare images for CLIP (must be 224x224)
+    clip_images = [c["image"].resize((224, 224)) for c in candidates]
+    
+    with torch.no_grad():
+        inputs = clip_processor(
+            text=[f"a portrait of {query}"], 
+            images=clip_images, 
+            return_tensors="pt", 
+            padding=True
+        ).to(device)
+        
+        outputs = clip_model(**inputs)
+        logits_per_image = outputs.logits_per_image 
+        probs = logits_per_image.softmax(dim=0).cpu().numpy()
+        
+    scored = []
+    for i, candidate in enumerate(candidates):
+        score = float(probs[i][0])
+        # Boost if it has a face
+        if candidate.get("has_face"):
+            score *= 1.5
+        scored.append({
+            "url": candidate["url"],
+            "score": score
+        })
+    return scored
+
 @app.get("/search_images")
 async def search_images(q: str):
-    # 1. Check Cache
-    cached_res = search_cache.get(q)
-    if cached_res:
-        return {"results": cached_res}
+    try:
+        start_time = time.time()
+        # 1. Check Cache
+        cached_res = search_cache.get(q)
+        if cached_res:
+            print(f"Cache hit for: {q}")
+            return {"results": cached_res}
 
-    # 2. Enhance Queries
-    enhanced_queries = [
-        f"{q} face close up portrait",
-        f"{q} official character headshot",
-        f"{q} front face portrait"
-    ]
-    
-    # 3. Fetch in Parallel
-    all_urls = []
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        # Try DDG first
-        futures = [executor.submit(get_ddg_images, query) for query in enhanced_queries]
-        for f in futures:
-            all_urls.extend(f.result())
+        print(f"Starting deep search for: {q}")
+        
+        # 2. Fetch Candidates
+        candidate_urls = fetch_candidate_images(q, limit=30) 
+        if not candidate_urls:
+            return {"results": []}
             
-        # Fallback to Bing if DDG was sparse
-        if len(all_urls) < 10:
-            futures = [executor.submit(search_bing_images, query) for query in enhanced_queries]
-            for f in futures:
-                all_urls.extend(f.result())
+        print(f"Fetched {len(candidate_urls)} candidates in {time.time() - start_time:.2f}s")
+        
+        # 3. Download & Basic Validate in Parallel
+        download_start = time.time()
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            # Download max 20 images to keep it fast and stable
+            results = list(executor.map(download_and_validate, candidate_urls[:20]))
+            downloaded = [r for r in results if r is not None]
+        print(f"Downloaded {len(downloaded)} images in {time.time() - download_start:.2f}s")
 
-    # 4. Filter Duplicates & Rank
-    unique_urls = list(dict.fromkeys(all_urls)) # Maintain order
-    scored_results = []
-    for url in unique_urls:
-        score = rank_image_result(url, q)
-        scored_results.append({"url": url, "score": score})
-    
-    # Sort by score descending
-    scored_results.sort(key=lambda x: x["score"], reverse=True)
+        if not downloaded:
+            return {"results": []}
 
-    # 5. Validate until we have 10
-    final_results = []
-    seen_urls = set()
-    
-    # Process in small batches for validation speed
-    batch_size = 5
-    with ThreadPoolExecutor(max_workers=10) as validator:
-        idx = 0
-        while len(final_results) < 10 and idx < len(scored_results):
-            batch = scored_results[idx : idx + batch_size]
-            idx += batch_size
-            
-            # Validate batch
-            valid_map = list(validator.map(lambda x: validate_image_url(x["url"]), batch))
-            
-            for i, is_valid in enumerate(valid_map):
-                if is_valid and len(final_results) < 10:
-                    url = batch[i]["url"]
-                    if url not in seen_urls:
-                        seen_urls.add(url)
-                        count = len(final_results) + 1
-                        final_results.append({
-                            "name": f"{q.title()} ({count})" if count > 1 else q.title(),
-                            "confidence": 1.0,
-                            "image": url
-                        })
+        # 4. Face Detection Filter (Sequential for stability)
+        face_start = time.time()
+        processed_candidates = filter_faces_batch(downloaded)
+        print(f"Processed {len(processed_candidates)} images for faces in {time.time() - face_start:.2f}s")
+        
+        # 5. Semantic CLIP Ranking 
+        clip_start = time.time()
+        scored_results = compute_clip_scores(q, processed_candidates) 
+        print(f"CLIP scoring took {time.time() - clip_start:.2f}s")
+        
+        # 6. Final Ranking & Formatting
+        scored_results.sort(key=lambda x: x["score"], reverse=True)
+        
+        final_results = []
+        for i, res in enumerate(scored_results[:10]):
+            count = i + 1
+            final_results.append({
+                "name": f"{q.title()} ({count})" if count > 1 else q.title(),
+                "confidence": 1.0,
+                "image": res["url"]
+            })
 
-    # 6. Cache and Return
-    search_cache.set(q, final_results)
-    return {"results": final_results}
+        print(f"Total search time: {time.time() - start_time:.2f}s")
+        # 7. Cache and Return
+        search_cache.set(q, final_results)
+        return {"results": final_results}
+    except Exception as e:
+        print(f"Search endpoint error: {e}")
+        return {"results": [], "error": str(e)}
 
 @app.get("/fetch_image")
 async def fetch_image(q: str, type: str = "actor"):

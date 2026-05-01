@@ -165,8 +165,8 @@
 		manualSelectedImage = null;
 
 		try {
-			// Set a 10s timeout for the fetch
-			const timeoutId = setTimeout(() => searchAbortController?.abort(), 10000);
+			// Set a 30s timeout for the fetch
+			const timeoutId = setTimeout(() => searchAbortController?.abort(), 30000);
 
 			const res = await fetch(`http://localhost:8000/search_images?q=${encodeURIComponent(query)}`, {
 				signal: searchAbortController.signal
@@ -332,7 +332,7 @@
 					disabled={isSearching || !searchQuery.trim()}
 					style="min-width: 100px;"
 				>
-					{isSearching ? 'Searching…' : 'Search'}
+					{isSearching ? 'Refining…' : 'Search'}
 				</AppButton>
 			</div>
 
