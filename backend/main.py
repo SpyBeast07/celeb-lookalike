@@ -1,5 +1,10 @@
 import sys
 import argparse
+import os
+
+# Suppress non-critical OpenCV/libpng warnings
+os.environ["OPENCV_LOG_LEVEL"] = "FATAL"
+
 from scripts.build_db import build_database
 from app.webcam import start_webcam
 
@@ -9,11 +14,15 @@ def main():
     parser.add_argument("--data", type=str, default="data/raw", help="Path to raw data for building database")
     parser.add_argument("--run", action="store_true", help="Start the webcam app")
     parser.add_argument("--server", action="store_true", help="Start the FastAPI server")
+    parser.add_argument("--clean", action="store_true", help="Sanitize images to fix metadata issues")
     
     args = parser.parse_args()
     
     if args.build:
         build_database(args.data)
+    elif args.clean:
+        from scripts.clean_images import clean_dataset
+        clean_dataset(args.data)
     elif args.run:
         start_webcam()
     elif args.server:

@@ -36,7 +36,7 @@ celeb-lookalike/
    ```
 2. Create a virtual environment:
    ```bash
-   python3 -m venv env
+   python3 -m venv venv
    ```
 3. Activate the virtual environment:
    - **Mac/Linux**: `source venv/bin/activate`
@@ -65,7 +65,14 @@ cd backend
 ./venv/bin/python main.py --build
 ```
 
-### 2. Start the Backend Server
+### 2. Sanitize Images (Optional)
+If you see warnings like "Corrupt JPEG data" during the build process, you can sanitize your images to fix metadata issues:
+```bash
+cd backend
+./venv/bin/python main.py --clean
+```
+
+### 3. Start the Backend Server
 ```bash
 cd backend
 ./venv/bin/python main.py --server
