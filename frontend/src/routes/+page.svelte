@@ -63,159 +63,9 @@
 	async function fetchCelebImage(name: string, age?: number, type: 'actor' | 'cartoon' = 'actor') {
 		try {
 			const cleanName = name.replace(' (C)', '').split('_').join(' ');
-
-			if (type === 'actor') {
-				// --- ACTOR SEARCH LOGIC ---
-				const possibleTitles = [
-					`${cleanName} (actor)`,
-					`${cleanName} (Indian actor)`,
-					cleanName,
-					`${cleanName} (Bollywood actor)`,
-					`${cleanName} (model)`
-				];
-
-				for (const title of possibleTitles) {
-					const directUrl = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&format=json&pithumbsize=600&redirects=1&origin=*`;
-					const directRes = await fetch(directUrl);
-					const directData = await directRes.json();
-
-					if (directData.query && directData.query.pages) {
-						const pages = directData.query.pages;
-						const pageId = Object.keys(pages)[0];
-						const page: any = pages[pageId];
-						if (pageId !== '-1' && page.thumbnail) {
-							if (title === cleanName) {
-								const lowerTitle = page.title.toLowerCase();
-								if (
-									lowerTitle.includes('temple') ||
-									lowerTitle.includes('statue') ||
-									lowerTitle.includes('shrine')
-								)
-									continue;
-							}
-							return page.thumbnail.source;
-						}
-					}
-				}
-
-				const queries = [`${cleanName} actor portrait`, `${cleanName} bollywood`, cleanName];
-
-				for (const query of queries) {
-					const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrlimit=10&prop=pageimages&format=json&pithumbsize=600&origin=*`;
-					const searchRes = await fetch(searchUrl);
-					const searchData = await searchRes.json();
-
-					if (searchData.query && searchData.query.pages) {
-						const results = Object.values(searchData.query.pages) as any[];
-						const target = cleanName.toLowerCase();
-						const firstWord = target.split(' ')[0];
-
-						for (const page of results) {
-							const title = page.title.toLowerCase();
-							if (title.includes(firstWord)) {
-								if (title.includes('actor') || title.includes('bollywood') || title === target) {
-									if (page.thumbnail) return page.thumbnail.source;
-								}
-							}
-						}
-						const firstWithThumb = results.find(
-							(p) => p.thumbnail && p.title.toLowerCase().includes(firstWord)
-						);
-						if (firstWithThumb) return firstWithThumb.thumbnail.source;
-					}
-				}
-			} else {
-				// --- CARTOON SEARCH LOGIC (Robust Reimplementation) ---
-				// 1. Try Opensearch first to find the most likely Wikipedia page
-				try {
-					const opensearchUrl = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(cleanName)}&limit=5&format=json&origin=*`;
-					const openRes = await fetch(opensearchUrl);
-					const openData = await openRes.json();
-
-					if (openData && openData[1] && openData[1].length > 0) {
-						for (const title of openData[1]) {
-							const lowerTitle = title.toLowerCase();
-							// Prioritize titles that clearly indicate a character or animation
-							if (
-								lowerTitle.includes('character') ||
-								lowerTitle.includes('animated') ||
-								lowerTitle.includes('cartoon') ||
-								lowerTitle.includes('anime') ||
-								lowerTitle.includes('series') ||
-								lowerTitle === cleanName.toLowerCase()
-							) {
-								const imgUrl = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&format=json&pithumbsize=600&redirects=1&origin=*`;
-								const imgRes = await fetch(imgUrl);
-								const imgData = await imgRes.json();
-
-								if (imgData.query && imgData.query.pages) {
-									const pages = imgData.query.pages;
-									const pageId = Object.keys(pages)[0];
-									const page: any = pages[pageId];
-									if (pageId !== '-1' && page.thumbnail) {
-										return page.thumbnail.source;
-									}
-								}
-							}
-						}
-					}
-				} catch (e) {
-					console.warn('Opensearch failed for cartoon, falling back...', e);
-				}
-
-				// 2. Fallback to Direct Disambiguation Titles
-				const possibleTitles = [
-					`${cleanName} (character)`,
-					`${cleanName} (animated character)`,
-					`${cleanName} (Disney character)`,
-					`${cleanName} (Pixar character)`,
-					`${cleanName} (cartoon)`,
-					`${cleanName} (anime)`,
-					cleanName
-				];
-
-				for (const title of possibleTitles) {
-					const directUrl = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&format=json&pithumbsize=600&redirects=1&origin=*`;
-					const directRes = await fetch(directUrl);
-					const directData = await directRes.json();
-
-					if (directData.query && directData.query.pages) {
-						const pages = directData.query.pages;
-						const pageId = Object.keys(pages)[0];
-						const page: any = pages[pageId];
-						if (pageId !== '-1' && page.thumbnail) {
-							return page.thumbnail.source;
-						}
-					}
-				}
-
-				// 3. Last Resort: Generator Search
-				const queries = [
-					`${cleanName} animated character wiki`,
-					`${cleanName} (character)`,
-					`${cleanName} cartoon`
-				];
-
-				for (const query of queries) {
-					const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrlimit=5&prop=pageimages&format=json&pithumbsize=600&origin=*`;
-					const searchRes = await fetch(searchUrl);
-					const searchData = await searchRes.json();
-
-					if (searchData.query && searchData.query.pages) {
-						const results = Object.values(searchData.query.pages) as any[];
-						const target = cleanName.toLowerCase();
-						const firstWord = target.split(' ')[0];
-
-						for (const page of results) {
-							const title = page.title.toLowerCase();
-							if (title.includes(firstWord) || title.includes(target)) {
-								if (page.thumbnail) return page.thumbnail.source;
-							}
-						}
-					}
-				}
-			}
-			return null;
+			const res = await fetch(`http://localhost:8000/fetch_image?q=${encodeURIComponent(cleanName)}&type=${type}`);
+			const data = await res.json();
+			return data.image || null;
 		} catch (err) {
 			console.error('Image fetch error:', err);
 			return null;
@@ -297,8 +147,7 @@
 	}
 
 	// ---- SEARCH FEATURE ----
-	// Searches Wikipedia for top 10 celebrities/cartoons matching the query,
-	// fetches their images, and loads them into the result grid.
+	// Uses backend DuckDuckGo Images search to return exactly 10 valid results.
 	async function handleSearch() {
 		const query = searchQuery.trim();
 		if (!query) return;
@@ -310,85 +159,18 @@
 		manualSelectedImage = null;
 
 		try {
-			// Step 1: Use Wikipedia opensearch to get candidate titles
-			const opensearchUrl = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=20&format=json&origin=*`;
-			const openRes = await fetch(opensearchUrl);
-			const openData = await openRes.json();
-
-			// openData is [query, [titles], [descriptions], [urls]]
-			const candidateTitles: string[] = (openData[1] as string[]) || [];
-
-			// Step 2: Also run a generator search to get more candidates
-			const genUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrlimit=20&prop=pageimages|extracts&exintro=1&exsentences=1&explaintext=1&format=json&pithumbsize=600&origin=*`;
-			const genRes = await fetch(genUrl);
-			const genData = await genRes.json();
-
-			// Collect titles from generator search (sorted by relevance index)
-			let genPages: any[] = [];
-			if (genData.query && genData.query.pages) {
-				genPages = Object.values(genData.query.pages) as any[];
-				genPages.sort((a: any, b: any) => a.index - b.index);
-			}
-
-			// Merge: opensearch titles first (most relevant), then generator pages not already included
-			const seenTitles = new Set<string>();
-			const mergedTitles: string[] = [];
-
-			for (const t of candidateTitles) {
-				if (!seenTitles.has(t.toLowerCase())) {
-					seenTitles.add(t.toLowerCase());
-					mergedTitles.push(t);
-				}
-			}
-			for (const p of genPages) {
-				if (!seenTitles.has(p.title.toLowerCase())) {
-					seenTitles.add(p.title.toLowerCase());
-					mergedTitles.push(p.title);
-				}
-			}
-
-			// Step 3: For top candidates, fetch images in parallel
-			// We'll attempt up to 20 to guarantee we find 10 with images
-			const topCandidates = mergedTitles.slice(0, 20);
-
-			const imagePromises = topCandidates.map(async (title) => {
-				try {
-					const imgUrl = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages|extracts&exintro=1&exsentences=1&explaintext=1&format=json&pithumbsize=600&redirects=1&origin=*`;
-					const imgRes = await fetch(imgUrl);
-					const imgData = await imgRes.json();
-
-					if (imgData.query && imgData.query.pages) {
-						const pages = imgData.query.pages;
-						const pageId = Object.keys(pages)[0];
-						const page: any = pages[pageId];
-						if (pageId !== '-1') {
-							return {
-								name: page.title,
-								confidence: 1.0,
-								image: page.thumbnail?.source || null,
-								extract: page.extract || ''
-							};
-						}
-					}
-				} catch (e) {
-					// silently skip failed fetches
-				}
-				return null;
-			});
-
-			const allResults = await Promise.all(imagePromises);
-
-			// Filter nulls, keep up to 10
-			searchResults = allResults
-				.filter((r): r is NonNullable<typeof r> => r !== null)
-				.slice(0, 10);
-
-			// Auto-select the first result
-			if (searchResults.length > 0) {
+			const res = await fetch(`http://localhost:8000/search_images?q=${encodeURIComponent(query)}`);
+			const data = await res.json();
+			
+			if (data.results && data.results.length > 0) {
+				searchResults = data.results;
 				selectedMatch = searchResults[0];
+			} else {
+				searchResults = [];
 			}
 		} catch (err) {
 			console.error('Search error:', err);
+			searchResults = [];
 		} finally {
 			isSearching = false;
 		}
