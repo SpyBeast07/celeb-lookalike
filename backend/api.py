@@ -7,7 +7,13 @@ from core.matcher import find_match
 from core.database import load_db
 import io
 import time
+import requests
+import re
+import asyncio
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
+from duckduckgo_search import DDGS
+from datetime import datetime, timedelta
 
 app = FastAPI(title="Celeb Lookalike API - New Engine")
 
@@ -132,20 +138,81 @@ async def analyze_face(file: UploadFile = File(...), request: Request = None, ca
         "results": results
     }
 
-from duckduckgo_search import DDGS
-import requests
-import re
-from concurrent.futures import ThreadPoolExecutor
+# --- Image Search Engine Core ---
 
-def search_bing_images(query, limit=10):
-    """Fallback scraper for Bing Images if DDG fails."""
+class SearchCache:
+    def __init__(self, ttl_seconds=600):
+        self.cache = {}
+        self.ttl = ttl_seconds
+
+    def get(self, key):
+        if key in self.cache:
+            entry = self.cache[key]
+            if datetime.now() < entry['expiry']:
+                return entry['data']
+            else:
+                del self.cache[key]
+        return None
+
+    def set(self, key, data):
+        self.cache[key] = {
+            'data': data,
+            'expiry': datetime.now() + timedelta(seconds=self.ttl)
+        }
+
+search_cache = SearchCache()
+
+def validate_image_url(url, timeout=1.5):
+    """Check if URL is a valid image with a HEAD request."""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"}
+        response = requests.head(url, headers=headers, timeout=timeout, allow_redirects=True)
+        if response.status_code == 200:
+            content_type = response.headers.get("Content-Type", "").lower()
+            return "image" in content_type
+    except:
+        pass
+    return False
+
+def rank_image_result(url, query):
+    """
+    Ranks an image result based on URL keywords and relevance to query.
+    Higher score is better.
+    """
+    score = 0
+    url_lower = url.lower()
+    
+    # Positive keywords (Face-focused)
+    face_keywords = ["face", "portrait", "close-up", "headshot", "official", "character"]
+    for kw in face_keywords:
+        if kw in url_lower:
+            score += 20
+            
+    # Resolution/Quality hints in URL
+    if "high" in url_lower or "hd" in url_lower or "large" in url_lower:
+        score += 10
+        
+    # Penalize negative keywords
+    negative_keywords = ["poster", "wallpaper", "group", "full-body", "background", "landscape", "wide"]
+    for kw in negative_keywords:
+        if kw in url_lower:
+            score -= 30
+            
+    # Aspect ratio hints (prefer square-ish for face cards)
+    # We can't know for sure without downloading, but some URLs have hints
+    if "square" in url_lower:
+        score += 15
+
+    return score
+
+def search_bing_images(query, limit=15):
+    """Robust scraper for Bing Images."""
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
         }
         url = f"https://www.bing.com/images/search?q={requests.utils.quote(query)}&form=HDRSC2&first=1"
-        response = requests.get(url, headers=headers, timeout=10)
-        # Extract image URLs from the 'm' (metadata) attribute in the HTML
+        response = requests.get(url, headers=headers, timeout=5)
         pattern = r'murl&quot;:&quot;(.*?)&quot;'
         urls = re.findall(pattern, response.text)
         return urls[:limit]
@@ -153,63 +220,83 @@ def search_bing_images(query, limit=10):
         print(f"Bing fallback error: {e}")
         return []
 
+def get_ddg_images(query, limit=15):
+    """Fetch images from DDG."""
+    try:
+        with DDGS() as ddgs:
+            return [res.get("image") for res in ddgs.images(query, max_results=limit) if res.get("image")]
+    except Exception as e:
+        print(f"DDG error for {query}: {e}")
+        return []
+
 @app.get("/search_images")
 async def search_images(q: str):
-    results = []
-    seen_urls = set()
-    
-    # Enhanced queries as requested
-    search_queries = [
-        f"{q} face portrait",
-        f"{q} character portrait",
-        f"{q} official art",
-        f"{q} close up"
+    # 1. Check Cache
+    cached_res = search_cache.get(q)
+    if cached_res:
+        return {"results": cached_res}
+
+    # 2. Enhance Queries
+    enhanced_queries = [
+        f"{q} face close up portrait",
+        f"{q} official character headshot",
+        f"{q} front face portrait"
     ]
     
-    def get_ddg_images(query):
-        try:
-            with DDGS() as ddgs:
-                return [res.get("image") for res in ddgs.images(query, max_results=15) if res.get("image")]
-        except Exception as e:
-            print(f"DDG error for {query}: {e}")
-            return []
-
-    # Try DDG first
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        all_urls_nested = list(executor.map(get_ddg_images, search_queries))
-    
-    all_urls = [url for sublist in all_urls_nested for url in sublist]
-    
-    # Fallback to Bing if DDG is empty (likely 403)
-    if not all_urls:
-        print("DDG failed/blocked, falling back to Bing...")
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            all_urls_nested = list(executor.map(lambda q: search_bing_images(q, 15), search_queries))
-        all_urls = [url for sublist in all_urls_nested for url in sublist]
-
-    for url in all_urls:
-        if url not in seen_urls and len(results) < 10:
-            seen_urls.add(url)
-            results.append({
-                "name": q.title(),
-                "confidence": 1.0,
-                "image": url
-            })
-
-    # Ensure exactly 10 results
-    if len(results) > 0:
-        while len(results) < 10:
-            results.append(results[len(results) % len(results)])
-    else:
-        # Absolute last resort: provide placeholders if everything failed (should not happen with Bing scraper)
-        for i in range(10):
-            results.append({
-                "name": q.title(),
-                "confidence": 1.0,
-                "image": "https://via.placeholder.com/600?text=No+Image+Found"
-            })
+    # 3. Fetch in Parallel
+    all_urls = []
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        # Try DDG first
+        futures = [executor.submit(get_ddg_images, query) for query in enhanced_queries]
+        for f in futures:
+            all_urls.extend(f.result())
             
-    return {"results": results}
+        # Fallback to Bing if DDG was sparse
+        if len(all_urls) < 10:
+            futures = [executor.submit(search_bing_images, query) for query in enhanced_queries]
+            for f in futures:
+                all_urls.extend(f.result())
+
+    # 4. Filter Duplicates & Rank
+    unique_urls = list(dict.fromkeys(all_urls)) # Maintain order
+    scored_results = []
+    for url in unique_urls:
+        score = rank_image_result(url, q)
+        scored_results.append({"url": url, "score": score})
+    
+    # Sort by score descending
+    scored_results.sort(key=lambda x: x["score"], reverse=True)
+
+    # 5. Validate until we have 10
+    final_results = []
+    seen_urls = set()
+    
+    # Process in small batches for validation speed
+    batch_size = 5
+    with ThreadPoolExecutor(max_workers=10) as validator:
+        idx = 0
+        while len(final_results) < 10 and idx < len(scored_results):
+            batch = scored_results[idx : idx + batch_size]
+            idx += batch_size
+            
+            # Validate batch
+            valid_map = list(validator.map(lambda x: validate_image_url(x["url"]), batch))
+            
+            for i, is_valid in enumerate(valid_map):
+                if is_valid and len(final_results) < 10:
+                    url = batch[i]["url"]
+                    if url not in seen_urls:
+                        seen_urls.add(url)
+                        count = len(final_results) + 1
+                        final_results.append({
+                            "name": f"{q.title()} ({count})" if count > 1 else q.title(),
+                            "confidence": 1.0,
+                            "image": url
+                        })
+
+    # 6. Cache and Return
+    search_cache.set(q, final_results)
+    return {"results": final_results}
 
 @app.get("/fetch_image")
 async def fetch_image(q: str, type: str = "actor"):

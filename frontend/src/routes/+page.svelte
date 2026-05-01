@@ -148,9 +148,15 @@
 
 	// ---- SEARCH FEATURE ----
 	// Uses backend DuckDuckGo Images search to return exactly 10 valid results.
+	let searchAbortController: AbortController | null = null;
+
 	async function handleSearch() {
 		const query = searchQuery.trim();
 		if (!query) return;
+
+		// Cancel any existing search
+		if (searchAbortController) searchAbortController.abort();
+		searchAbortController = new AbortController();
 
 		isSearching = true;
 		searchMode = true;
@@ -159,7 +165,14 @@
 		manualSelectedImage = null;
 
 		try {
-			const res = await fetch(`http://localhost:8000/search_images?q=${encodeURIComponent(query)}`);
+			// Set a 10s timeout for the fetch
+			const timeoutId = setTimeout(() => searchAbortController?.abort(), 10000);
+
+			const res = await fetch(`http://localhost:8000/search_images?q=${encodeURIComponent(query)}`, {
+				signal: searchAbortController.signal
+			});
+			
+			clearTimeout(timeoutId);
 			const data = await res.json();
 			
 			if (data.results && data.results.length > 0) {
@@ -168,11 +181,16 @@
 			} else {
 				searchResults = [];
 			}
-		} catch (err) {
-			console.error('Search error:', err);
+		} catch (err: any) {
+			if (err.name === 'AbortError') {
+				console.log('Search aborted or timed out');
+			} else {
+				console.error('Search error:', err);
+			}
 			searchResults = [];
 		} finally {
 			isSearching = false;
+			searchAbortController = null;
 		}
 	}
 
