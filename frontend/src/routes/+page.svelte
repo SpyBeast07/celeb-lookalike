@@ -19,6 +19,12 @@
 	let manualSelectedImage: string | null = $state(null);
 	let stream: MediaStream | undefined = $state();
 
+	// Search feature state
+	let searchQuery = $state('');
+	let isSearching = $state(false);
+	let searchResults = $state<any[]>([]);
+	let searchMode = $state(false); // true when showing search results instead of AI results
+
 	// Projection state (frozen when "Show Live" is clicked)
 	let projectedMatch = $state<any>(null);
 	let projectedManualImage = $state<string | null>(null);
@@ -284,6 +290,119 @@
 		projectedManualImage = null;
 		showOnTV = false;
 		projectionStep = 0;
+		// Also clear search state
+		searchQuery = '';
+		searchResults = [];
+		searchMode = false;
+	}
+
+	// ---- SEARCH FEATURE ----
+	// Searches Wikipedia for top 10 celebrities/cartoons matching the query,
+	// fetches their images, and loads them into the result grid.
+	async function handleSearch() {
+		const query = searchQuery.trim();
+		if (!query) return;
+
+		isSearching = true;
+		searchMode = true;
+		searchResults = [];
+		selectedMatch = null;
+		manualSelectedImage = null;
+
+		try {
+			// Step 1: Use Wikipedia opensearch to get candidate titles
+			const opensearchUrl = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=20&format=json&origin=*`;
+			const openRes = await fetch(opensearchUrl);
+			const openData = await openRes.json();
+
+			// openData is [query, [titles], [descriptions], [urls]]
+			const candidateTitles: string[] = (openData[1] as string[]) || [];
+
+			// Step 2: Also run a generator search to get more candidates
+			const genUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrlimit=20&prop=pageimages|extracts&exintro=1&exsentences=1&explaintext=1&format=json&pithumbsize=600&origin=*`;
+			const genRes = await fetch(genUrl);
+			const genData = await genRes.json();
+
+			// Collect titles from generator search (sorted by relevance index)
+			let genPages: any[] = [];
+			if (genData.query && genData.query.pages) {
+				genPages = Object.values(genData.query.pages) as any[];
+				genPages.sort((a: any, b: any) => a.index - b.index);
+			}
+
+			// Merge: opensearch titles first (most relevant), then generator pages not already included
+			const seenTitles = new Set<string>();
+			const mergedTitles: string[] = [];
+
+			for (const t of candidateTitles) {
+				if (!seenTitles.has(t.toLowerCase())) {
+					seenTitles.add(t.toLowerCase());
+					mergedTitles.push(t);
+				}
+			}
+			for (const p of genPages) {
+				if (!seenTitles.has(p.title.toLowerCase())) {
+					seenTitles.add(p.title.toLowerCase());
+					mergedTitles.push(p.title);
+				}
+			}
+
+			// Step 3: For top candidates, fetch images in parallel
+			// We'll attempt up to 20 to guarantee we find 10 with images
+			const topCandidates = mergedTitles.slice(0, 20);
+
+			const imagePromises = topCandidates.map(async (title) => {
+				try {
+					const imgUrl = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages|extracts&exintro=1&exsentences=1&explaintext=1&format=json&pithumbsize=600&redirects=1&origin=*`;
+					const imgRes = await fetch(imgUrl);
+					const imgData = await imgRes.json();
+
+					if (imgData.query && imgData.query.pages) {
+						const pages = imgData.query.pages;
+						const pageId = Object.keys(pages)[0];
+						const page: any = pages[pageId];
+						if (pageId !== '-1') {
+							return {
+								name: page.title,
+								confidence: 1.0,
+								image: page.thumbnail?.source || null,
+								extract: page.extract || ''
+							};
+						}
+					}
+				} catch (e) {
+					// silently skip failed fetches
+				}
+				return null;
+			});
+
+			const allResults = await Promise.all(imagePromises);
+
+			// Filter nulls, keep up to 10
+			searchResults = allResults
+				.filter((r): r is NonNullable<typeof r> => r !== null)
+				.slice(0, 10);
+
+			// Auto-select the first result
+			if (searchResults.length > 0) {
+				selectedMatch = searchResults[0];
+			}
+		} catch (err) {
+			console.error('Search error:', err);
+		} finally {
+			isSearching = false;
+		}
+	}
+
+	function handleSearchKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') handleSearch();
+	}
+
+	function clearSearch() {
+		searchQuery = '';
+		searchResults = [];
+		searchMode = false;
+		selectedMatch = actors[0] || cartoons[0] || null;
 	}
 
 	function handleFileSelect(event: Event) {
@@ -382,6 +501,41 @@
 		</div>
 
 		<div class="right-column">
+			<!-- Search Bar Row -->
+			<div class="search-row">
+				<div class="search-input-wrap">
+					<svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<circle cx="11" cy="11" r="8"/>
+						<line x1="21" y1="21" x2="16.65" y2="16.65"/>
+					</svg>
+					<input
+						id="celeb-search-input"
+						type="text"
+						class="search-input"
+						placeholder="Search any celebrity or cartoon…"
+						bind:value={searchQuery}
+						onkeydown={handleSearchKeydown}
+						disabled={isSearching}
+					/>
+					{#if searchMode}
+						<button class="clear-btn" onclick={clearSearch} title="Clear search">
+							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14">
+								<line x1="18" y1="6" x2="6" y2="18"/>
+								<line x1="6" y1="6" x2="18" y2="18"/>
+							</svg>
+						</button>
+					{/if}
+				</div>
+				<AppButton
+					variant="primary"
+					onclick={handleSearch}
+					disabled={isSearching || !searchQuery.trim()}
+					style="min-width: 100px;"
+				>
+					{isSearching ? 'Searching…' : 'Search'}
+				</AppButton>
+			</div>
+
 			<div class="controls-row">
 				{#if capturedImage}<AppButton variant="secondary" onclick={handleReset}>Reset Cam</AppButton
 					>{/if}
@@ -397,11 +551,32 @@
 
 			<div class="unified-results-grid">
 				<!-- Results Section -->
-				{#if !resultsFound && !isFinding}
+				{#if isSearching}
+					<!-- Searching shimmer -->
+					{#each Array(10) as _}<ResultCard type="skeleton" shimmer />{/each}
+				{:else if searchMode && searchResults.length > 0}
+					<!-- Search results mode -->
+					{#each searchResults as result}
+						<ResultCard
+							item={result}
+							type="actor"
+							selected={selectedMatch === result}
+							onclick={() => selectMatch(result)}
+						/>
+					{/each}
+					<!-- Fill remaining slots with skeletons if fewer than 10 results -->
+					{#each Array(Math.max(0, 10 - searchResults.length)) as _}<ResultCard type="skeleton" />{/each}
+				{:else if searchMode && searchResults.length === 0 && !isSearching}
+					<!-- No results found -->
+					{#each Array(10) as _}<ResultCard type="skeleton" />{/each}
+				{:else if !resultsFound && !isFinding}
+					<!-- Default idle state -->
 					{#each Array(10) as _}<ResultCard type="skeleton" />{/each}
 				{:else if isFinding}
+					<!-- AI analyzing -->
 					{#each Array(10) as _}<ResultCard type="skeleton" shimmer />{/each}
 				{:else}
+					<!-- AI results mode -->
 					{#each actors as actor}
 						<ResultCard
 							item={actor}
@@ -487,6 +662,81 @@
 </div>
 
 <style>
+	/* ---- Search Bar Styles ---- */
+	.search-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 10px;
+	}
+
+	.search-input-wrap {
+		flex: 1;
+		position: relative;
+		display: flex;
+		align-items: center;
+	}
+
+	.search-icon {
+		position: absolute;
+		left: 12px;
+		width: 15px;
+		height: 15px;
+		color: rgba(255, 255, 255, 0.35);
+		pointer-events: none;
+		flex-shrink: 0;
+	}
+
+	.search-input {
+		width: 100%;
+		background: rgba(255, 255, 255, 0.04);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		border-radius: 8px;
+		color: #fff;
+		font-size: 0.8rem;
+		font-weight: 500;
+		letter-spacing: 0.5px;
+		padding: 10px 36px 10px 36px;
+		outline: none;
+		transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+		font-family: inherit;
+	}
+
+	.search-input::placeholder {
+		color: rgba(255, 255, 255, 0.25);
+	}
+
+	.search-input:focus {
+		border-color: rgba(0, 255, 136, 0.5);
+		background: rgba(255, 255, 255, 0.07);
+		box-shadow: 0 0 0 3px rgba(0, 255, 136, 0.08);
+	}
+
+	.search-input:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.clear-btn {
+		position: absolute;
+		right: 10px;
+		background: none;
+		border: none;
+		cursor: pointer;
+		color: rgba(255, 255, 255, 0.4);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 3px;
+		border-radius: 4px;
+		transition: color 0.15s;
+	}
+
+	.clear-btn:hover {
+		color: rgba(255, 255, 255, 0.9);
+	}
+
+	/* ---- Controls Row ---- */
 	.controls-row {
 		display: flex;
 		justify-content: flex-end;
